@@ -1,0 +1,7 @@
+{
+  "name": "aliyun-ecs-dsec",
+  "repository": "git@github.com:rockdai/aliyun-ecs-dsec.git",
+  "dependencies": {
+    "@alicloud/ecs20140526": "^5.0.0"
+  }
+}
