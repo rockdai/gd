@@ -3,9 +3,8 @@ const ECSClient = require('@alicloud/ecs20140526').default;
 
 const DDNS_DOMAIN = process.env.DDNS_DOMAIN;
 const DNS_SERVER = process.env.DNS_SERVER || '223.5.5.5';
-const SECURITY_GROUP_ID = process.env.SECURITY_GROUP_ID;
-const SECURITY_GROUP_RULE_ID = process.env.SECURITY_GROUP_RULE_ID;
-const SECURITY_GROUP_REGION_ID = process.env.SECURITY_GROUP_REGION_ID || 'cn-hangzhou';
+// [{ groupId, ruleId, regionId }]
+const SECURITY_GROUP_CONF = JSON.parse(process.env.SECURITY_GROUP_CONF);
 
 exports.handler = (evt, ctx, cb) => {
 
@@ -19,23 +18,24 @@ exports.handler = (evt, ctx, cb) => {
     const addrs = await resolver.resolve4(DDNS_DOMAIN);
     console.log('dns', addrs);
 
-    const client = new ECSClient({
-      accessKeyId: process.env.ACCESS_KEY_ID,
-      accessKeySecret: process.env.ACCESS_KEY_SECRET,
-      endpoint: `ecs.${SECURITY_GROUP_REGION_ID}.aliyuncs.com`,
-    });
-    const rule = {
-      regionId: SECURITY_GROUP_REGION_ID,
-      securityGroupId: SECURITY_GROUP_ID,
-      securityGroupRuleId: SECURITY_GROUP_RULE_ID,
-      sourceCidrIp: addrs[0],
-      description: `AutoUpdated@${Date().toString()}`,
-    };
-    console.log('rule', rule);
-    const sg = await client.modifySecurityGroupRule(rule);
-    console.log('response', sg.body);
-
-    return cb(null, { dns: addrs, rule, resp: sg });
+    for (const CONF of SECURITY_GROUP_CONF) {
+      const client = new ECSClient({
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        accessKeySecret: process.env.ACCESS_KEY_SECRET,
+        endpoint: `ecs.${CONF.regionId}.aliyuncs.com`,
+      });
+      const rule = {
+        regionId: CONF.regionId,
+        securityGroupId: CONF.groupId,
+        securityGroupRuleId: CONF.ruleId,
+        sourceCidrIp: addrs[0],
+        description: `AutoUpdated@${Date().toString()}`,
+      };
+      console.log('rule', rule);
+      const sg = await client.modifySecurityGroupRule(rule);
+      console.log('response', sg.body);
+    }
+    return cb(null, true);
   })().catch(ex => {
     console.log(ex);
     cb(ex);
