@@ -1,70 +1,72 @@
-const dns = require('node:dns').promises;
 const ECSClient = require('@alicloud/ecs20140526').default;
 const SWASClient = require('@alicloud/swas-open20200601').default;
 
-const DDNS_DOMAIN = process.env.DDNS_DOMAIN;
-const DNS_SERVER = process.env.DNS_SERVER || '223.5.5.5';
-// SECURITY_GROUP_CONF 格式:
-// [
-//   { product, groupId, ruleId, regionId }, // ECS 安全组规则
-//   { product, instanceId, ruleId, regionId } // 轻量应用服务器规则
-// ]
-console.log(process.env.SECURITY_GROUP_CONF);
-const SECURITY_GROUP_CONF = JSON.parse(process.env.SECURITY_GROUP_CONF);
+const PORT_RANGE = '1/65535';
+const { DOMAIN, RuleConfig } = require('./config');
 
 exports.handler = (evt, ctx, cb) => {
-
-  // 自定义 DNS 服务器为阿里公共 DNS 服务器
-  const resolver = new dns.Resolver();
-  resolver.setServers([ DNS_SERVER ]);
-
   (async () => {
-    console.log('domain', DDNS_DOMAIN);
-    // 获取 DNS
-    const addrs = await resolver.resolve4(DDNS_DOMAIN);
-    console.log('dns', addrs);
 
-    const sourceCidrIp = addrs[0];
+    // 首先将所有域名解析出 IP 地址以备后用
+    const domainList = Object.values(DOMAIN);
+    console.log('Domain config', domainList);
+
+    const ipMap = {};
+    for (const domain of domainList) {
+      const addrs = await fetchDns(domain);
+      console.log('----------Domain', domain, 'parsed result', addrs);
+      ipMap[domain] = addrs;
+    }
+    console.log('Domain parsed result', ipMap);
+
     const credential = {
       accessKeyId: process.env.ACCESS_KEY_ID,
       accessKeySecret: process.env.ACCESS_KEY_SECRET,
     };
-    const desc = `AutoUpdated@${Date().toString()}`;
-
-    for (const CONF of SECURITY_GROUP_CONF) {
-      console.log('start', CONF);
+    // 逐条处理
+    for (const CONF of RuleConfig) {
+      console.log('----------------------------------------');
+      console.log('Start to handle', CONF);
+      const current = getDate();
 
       if (CONF.product === 'ecs') {
         const client = new ECSClient({
           endpoint: `ecs.${CONF.regionId}.aliyuncs.com`,
           ...credential,
         });
-        const rule = {
-          regionId: CONF.regionId,
-          securityGroupId: CONF.groupId,
-          securityGroupRuleId: CONF.ruleId,
-          sourceCidrIp,
-          description: desc,
-        };
-        console.log('rule', rule);
-        const resp = await client.modifySecurityGroupRule(rule);
-        console.log('response', resp.body);
+        for (const RULE of CONF.ruleList) {
+          const rule = {
+            regionId: CONF.regionId,
+            securityGroupId: CONF.groupId,
+            securityGroupRuleId: RULE.id,
+            sourceCidrIp: ipMap[RULE.name],
+            description: `${RULE.name}@${current}`,
+            portRange: PORT_RANGE,
+          };
+          console.log('Rule to config', rule);
+          const resp = await client.modifySecurityGroupRule(rule);
+          console.log('Config response', resp.body);
+        }
       }
       if (CONF.product === 'swas-open') {
         const client = new SWASClient({
           endpoint: `swas.${CONF.regionId}.aliyuncs.com`,
+          regionId: CONF.regionId,
           ...credential,
         });
-        const rule = {
-          ...CONF,
-          sourceCidrIp,
-          remark: desc,
-          ruleProtocol: 'TCP',
-          port: '1/65535',
-        };
-        console.log('rule', rule);
-        const resp = await client.modifyFirewallRule(rule);
-        console.log('response', resp.body);
+        for (const RULE of CONF.ruleList) {
+          const rule = {
+            instanceId: CONF.instanceId,
+            ruleId: RULE.id,
+            sourceCidrIp: ipMap[RULE.name],
+            remark: `${RULE.name}@${current}`,
+            ruleProtocol: 'TCP',
+            port: PORT_RANGE,
+          };
+          console.log('Rule to config', rule);
+          const resp = await client.modifyFirewallRule(rule);
+          console.log('Config response', resp.body);
+        }
       }
     }
     return cb(null, true);
@@ -73,3 +75,31 @@ exports.handler = (evt, ctx, cb) => {
     cb(ex);
   });
 };
+
+async function fetchDns(domain) {
+  const url = `http://dns.alidns.com/resolve?name=${domain}&type=1`;
+  const response = await fetch(url, {
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`请求 DNS 解析服务失败，状态码：${response.status}`);
+  }
+  const json = await response.json();
+  return json.Answer[0].data;
+}
+
+function getDate() {
+  const now = new Date();
+
+  const month = String(now.getMonth() + 1).padStart(2, '0'); // 月份从 0 开始
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+
+  return `${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+exports.handler(null, null, (err, res) => {
+  console.log(err, res);
+});
