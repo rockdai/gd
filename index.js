@@ -99,7 +99,3 @@ function getDate() {
 
   return `${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
-
-exports.handler(null, null, (err, res) => {
-  console.log(err, res);
-});
