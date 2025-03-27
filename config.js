@@ -45,4 +45,12 @@ exports.RuleConfig = [{
     { name: DOMAIN.XFYJ, id: '7ea5c24bb3c148c0b67b9719873c6dec' },
     { name: DOMAIN.SJMZ, id: 'ec66ce20a3af441082fa4cf1323d9d40' },
   ],
+}, {
+  // a.keydiary.dev
+  product: 'swas-open',
+  instanceId: '49526f1e25d646fd92006a212f7e4b6a',
+  regionId: 'cn-hongkong',
+  ruleList: [
+    { name: DOMAIN.XFYJ, id: 'c4bcb8dc7a914fe1bacc1e7d6392d09c' },
+  ],
 }];
