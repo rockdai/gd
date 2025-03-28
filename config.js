@@ -1,8 +1,9 @@
 'use strict';
 
 const DOMAIN = exports.DOMAIN = {
-  XFYJ: 'home.limengna.com',
-  SJMZ: 'fn.rockdai.top',
+  XFYJ: 'xfyj.limengna.com',
+  SJMZ: 'sjmz.limengna.com',
+  SJMZ_BK: 'fn.rockdai.top',
 };
 
 exports.RuleConfig = [{
@@ -20,6 +21,7 @@ exports.RuleConfig = [{
   ruleList: [
     { name: DOMAIN.XFYJ, id: 'de66f0d108914ffa90cc5ee4b07ae178' },
     { name: DOMAIN.SJMZ, id: '48dc7007353e490baf79e1104e566dc0' },
+    { name: DOMAIN.SJMZ_BK, id: 'f863b9f711e649e39568c6650b6a79ae' },
   ],
 }, {
   product: 'swas-open',
