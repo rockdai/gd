@@ -1,5 +1,5 @@
-const ECSClient = require('@alicloud/ecs20140526').default;
-const SWASClient = require('@alicloud/swas-open20200601').default;
+const { default: ECSClient, ModifySecurityGroupRuleRequest } = require('@alicloud/ecs20140526');
+const { default: SWASClient, ModifyFirewallRuleRequest } = require('@alicloud/swas-open20200601');
 
 const PORT_RANGE = '1/65535';
 const { DOMAIN, RuleConfig } = require('./config');
@@ -14,7 +14,7 @@ exports.handler = (evt, ctx, cb) => {
     const ipMap = {};
     for (const domain of domainList) {
       const addrs = await fetchDns(domain);
-      console.log('----------Domain', domain, 'parsed result', addrs);
+      console.log('::::Domain', domain, 'parsed result', addrs);
       ipMap[domain] = addrs;
     }
     console.log('Domain parsed result', ipMap);
@@ -35,14 +35,14 @@ exports.handler = (evt, ctx, cb) => {
           ...credential,
         });
         for (const RULE of CONF.ruleList) {
-          const rule = {
+          const rule = new ModifySecurityGroupRuleRequest({
             regionId: CONF.regionId,
             securityGroupId: CONF.groupId,
             securityGroupRuleId: RULE.id,
             sourceCidrIp: ipMap[RULE.name],
             description: `${RULE.name}@${current}`,
             portRange: PORT_RANGE,
-          };
+          });
           console.log('Rule to config', rule);
           const resp = await client.modifySecurityGroupRule(rule);
           console.log('Config response', resp.body);
@@ -55,17 +55,25 @@ exports.handler = (evt, ctx, cb) => {
           ...credential,
         });
         for (const RULE of CONF.ruleList) {
-          const rule = {
+          const rule = new ModifyFirewallRuleRequest({
             instanceId: CONF.instanceId,
             ruleId: RULE.id,
             sourceCidrIp: ipMap[RULE.name],
             remark: `${RULE.name}@${current}`,
             ruleProtocol: 'TCP',
             port: PORT_RANGE,
-          };
+          });
           console.log('Rule to config', rule);
-          const resp = await client.modifyFirewallRule(rule);
-          console.log('Config response', resp.body);
+          try {
+            const resp = await client.modifyFirewallRule(rule);
+            console.log('Config response', resp.body);
+          } catch (ex) {
+            if (ex.message.includes('FirewallRuleAlreadyExist')) {
+              console.log('Firewall rule already exists, skip');
+              continue;
+            }
+            throw ex;
+          }
         }
       }
     }
