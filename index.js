@@ -44,8 +44,16 @@ exports.handler = (evt, ctx, cb) => {
             portRange: PORT_RANGE,
           });
           console.log('Rule to config', rule);
-          const resp = await client.modifySecurityGroupRule(rule);
-          console.log('Config response', resp.body);
+          try {
+            const resp = await client.modifySecurityGroupRule(rule);
+            console.log('Config response', resp.body);
+          } catch (ex) {
+            if (ex.message.includes('RuleDuplicate')) {
+              console.log('Security group rule already exists, skip');
+              continue;
+            }
+            throw ex;
+          }
         }
       }
       if (CONF.product === 'swas-open') {
