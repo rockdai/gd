@@ -2,8 +2,7 @@
 
 const DOMAIN = exports.DOMAIN = {
   XFYJ: 'xfyj.limengna.com',
-  SJMZ: 'sjmz.limengna.com',
-  SJMZ_BK: 'fn.rockdai.top',
+  XFYJ_BK: 'fn.rockdai.top',
 };
 
 exports.RuleConfig = [{
@@ -12,7 +11,7 @@ exports.RuleConfig = [{
   regionId: 'cn-hangzhou',
   ruleList: [
     { name: DOMAIN.XFYJ, id: 'sgr-bp1h6rk3pgct6dzmdfiw' },
-    { name: DOMAIN.SJMZ, id: 'sgr-bp1fvr0ojwfsynjdk423' },
+    { name: DOMAIN.XFYJ_BK, id: 'sgr-bp1fvr0ojwfsynjdk423' },
   ],
 }, {
   product: 'swas-open',
@@ -20,8 +19,7 @@ exports.RuleConfig = [{
   regionId: 'cn-hangzhou',
   ruleList: [
     { name: DOMAIN.XFYJ, id: 'de66f0d108914ffa90cc5ee4b07ae178' },
-    { name: DOMAIN.SJMZ, id: '48dc7007353e490baf79e1104e566dc0' },
-    { name: DOMAIN.SJMZ_BK, id: 'f863b9f711e649e39568c6650b6a79ae' },
+    { name: DOMAIN.XFYJ_BK, id: '48dc7007353e490baf79e1104e566dc0' },
   ],
 }, {
   product: 'swas-open',
@@ -29,7 +27,7 @@ exports.RuleConfig = [{
   regionId: 'ap-northeast-1',
   ruleList: [
     { name: DOMAIN.XFYJ, id: 'cc75fecab9b74db0be1548f0f2207b99' },
-    { name: DOMAIN.SJMZ, id: 'c6023c53805b4a4d9feab50aa497dac5' },
+    { name: DOMAIN.XFYJ_BK, id: 'c6023c53805b4a4d9feab50aa497dac5' },
   ],
 }, {
   product: 'swas-open',
@@ -37,7 +35,7 @@ exports.RuleConfig = [{
   regionId: 'cn-hangzhou',
   ruleList: [
     { name: DOMAIN.XFYJ, id: 'c97e325c56df4f2ba3df36553185e79e' },
-    { name: DOMAIN.SJMZ, id: '09dcbccdf474475daa7a7b39fbd64b07' },
+    { name: DOMAIN.XFYJ_BK, id: '09dcbccdf474475daa7a7b39fbd64b07' },
   ],
 }, {
   product: 'swas-open',
@@ -45,7 +43,7 @@ exports.RuleConfig = [{
   regionId: 'us-west-1',
   ruleList: [
     { name: DOMAIN.XFYJ, id: '7ea5c24bb3c148c0b67b9719873c6dec' },
-    { name: DOMAIN.SJMZ, id: 'ec66ce20a3af441082fa4cf1323d9d40' },
+    { name: DOMAIN.XFYJ_BK, id: 'ec66ce20a3af441082fa4cf1323d9d40' },
   ],
 }, {
   // a.keydiary.dev
