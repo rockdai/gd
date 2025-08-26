@@ -2,7 +2,7 @@
 
 const DOMAIN = exports.DOMAIN = {
   XFYJ: 'xfyj.limengna.com',
-  XFYJ_BK: 'fn.rockdai.top',
+  XFYJ_BK: 'unicom.limengna.com',
 };
 
 exports.RuleConfig = [{
