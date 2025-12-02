@@ -2,6 +2,7 @@
 
 const DOMAIN = exports.DOMAIN = {
   XFYJ: 'xfyj.limengna.com',
+  XFYJ_BK: 'unicom.limengna.com',
 };
 
 exports.RuleConfig = [{
@@ -10,6 +11,7 @@ exports.RuleConfig = [{
   regionId: 'cn-hangzhou',
   ruleList: [
     { name: DOMAIN.XFYJ, id: 'de66f0d108914ffa90cc5ee4b07ae178' },
+    { name: DOMAIN.XFYJ_BK, id: '48dc7007353e490baf79e1104e566dc0' },
   ],
 }, {
   product: 'swas-open',
@@ -17,6 +19,7 @@ exports.RuleConfig = [{
   regionId: 'ap-northeast-1',
   ruleList: [
     { name: DOMAIN.XFYJ, id: 'cc75fecab9b74db0be1548f0f2207b99' },
+    { name: DOMAIN.XFYJ_BK, id: 'c6023c53805b4a4d9feab50aa497dac5' },
   ],
 }, {
   product: 'swas-open',
@@ -24,6 +27,7 @@ exports.RuleConfig = [{
   regionId: 'us-west-1',
   ruleList: [
     { name: DOMAIN.XFYJ, id: '7ea5c24bb3c148c0b67b9719873c6dec' },
+    { name: DOMAIN.XFYJ_BK, id: 'ec66ce20a3af441082fa4cf1323d9d40' },
   ],
 }, {
   // a.keydiary.dev
