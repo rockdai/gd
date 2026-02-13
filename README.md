@@ -29,12 +29,19 @@
 
 ## 运行方式
 
-### 1) 环境变量（AK）
+### 1) 凭证（AK）
 
-在函数计算 FC（或本地运行）时需要提供：
+在函数计算 FC（或本地运行）时需要提供 AK，支持两种方式：
+
+A) 环境变量：
 
 - `ACCESS_KEY_ID`
 - `ACCESS_KEY_SECRET`
+
+B) 本地配置文件（推荐用于命令行，不用把敏感信息写进命令历史）：
+
+- 在项目根目录创建 `.aliyun.conf`（key=value 格式），可从 `.aliyun.conf.example` 复制
+- 该文件已加入 `.gitignore`，**不要提交**
 
 建议使用**最小权限**的 RAM 子账号/角色，只授予修改对应安全组/防火墙规则所需的权限。
 
@@ -74,7 +81,13 @@ ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node -e "require('./index').handler({}, 
 
 ```bash
 npm i
-# 推荐：在项目目录下执行（会使用本 repo 的代码）
+
+# 方式 A：用配置文件（推荐）
+cp .aliyun.conf.example .aliyun.conf
+# 编辑 .aliyun.conf 填入 ACCESS_KEY_ID / ACCESS_KEY_SECRET
+node bin/ecs-dsec-handler.js
+
+# 方式 B：用环境变量
 ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node bin/ecs-dsec-handler.js
 
 # 指定 IP / dry-run

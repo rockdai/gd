@@ -130,3 +130,6 @@ dist
 .pnp.*
 
 package-lock.json
+
+# Aliyun credentials (DO NOT COMMIT)
+.aliyun.conf
