@@ -1,6 +1,11 @@
 {
   "name": "aliyun-ecs-dsec",
+  "version": "0.0.0",
+  "private": true,
   "repository": "git@github.com:rockdai/aliyun-ecs-dsec.git",
+  "bin": {
+    "ecs-dsec-handler": "bin/ecs-dsec-handler.js"
+  },
   "dependencies": {
     "@alicloud/ecs20140526": "6.1.0",
     "@alicloud/swas-open20200601": "4.0.0"
