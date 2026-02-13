@@ -1,8 +1,8 @@
 'use strict';
 
 const DOMAIN = exports.DOMAIN = {
-  XFYJ: 'xfyj.limengna.com',
-  XFYJ_BK: 'unicom.limengna.com',
+  XFYJ: 'xfyj.keydiary.dev',
+  XFYJ_BK: 'xfyj2.keydiary.dev',
 };
 
 exports.RuleConfig = [{
@@ -38,11 +38,11 @@ exports.RuleConfig = [{
     { name: DOMAIN.XFYJ, id: 'c4bcb8dc7a914fe1bacc1e7d6392d09c' },
   ],
 }, {
-  // hk2.keydiary.dev
+  // b.keydiary.dev
   product: 'swas-open',
-  instanceId: '93ec79b37aa64740be313a4b4cbaec32',
+  instanceId: '316697f46fad405193bdd6e134e5b64e',
   regionId: 'cn-hongkong',
   ruleList: [
-    { name: DOMAIN.XFYJ, id: '4e15e44f668446c694fb8a4b5132744e' },
+    { name: DOMAIN.XFYJ, id: '64415df03cd94c0f9385f4106960b584' },
   ],
 }];
