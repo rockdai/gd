@@ -1,0 +1,5 @@
+# Copy this file to .aliyun.conf and fill in your credentials.
+# IMPORTANT: .aliyun.conf is gitignored (do not commit secrets).
+
+ACCESS_KEY_ID=your_access_key_id
+ACCESS_KEY_SECRET=your_access_key_secret

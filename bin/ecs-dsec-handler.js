@@ -42,11 +42,12 @@ function parseArgs(argv) {
     const ip = args.ip || await getPublicIp();
     console.log('[ecs-dsec-handler] public ip =', ip);
 
-    const accessKeyId = process.env.ACCESS_KEY_ID;
-    const accessKeySecret = process.env.ACCESS_KEY_SECRET;
+    const { resolveCredentials } = require('../lib/aliyun-conf');
+    const { accessKeyId, accessKeySecret, source } = resolveCredentials({ cwd: __dirname });
     if (!accessKeyId || !accessKeySecret) {
-      throw new Error('Missing env: ACCESS_KEY_ID / ACCESS_KEY_SECRET');
+      throw new Error('Missing credentials: set env ACCESS_KEY_ID/ACCESS_KEY_SECRET, or create .aliyun.conf (see .aliyun.conf.example)');
     }
+    console.log('[ecs-dsec-handler] credential source =', source || '(unknown)');
 
     const { RuleConfig } = require('../config');
 
