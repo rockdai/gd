@@ -11,7 +11,7 @@
   },
   "scripts": {
     "dev": "egg-bin dev",
-    "start": "node bootstrap.js",
+    "start": "EGG_SERVER_ENV=prod NODE_ENV=prod EGG_WORKERS=1 node bootstrap.js",
     "test": "egg-bin test",
     "cov": "egg-bin cov"
   },
