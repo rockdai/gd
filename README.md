@@ -81,17 +81,19 @@ ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node -e "require('./index').handler({}, 
 | 函数 | 说明 | 触发方式 |
 |------|------|----------|
 | `gd-web` | Egg.js Web 服务（PWA） | HTTP 触发器 |
-| `gd-cron` | 定时更新白名单（原 index.js） | 定时触发器（每 5 分钟） |
+| `ecs-dsec` | 定时更新白名单（原 index.js） | 定时触发器（每 5 分钟） |
+
+> 函数配置（runtime、内存、超时、触发器等）在阿里云控制台管理，`s.yaml` 仅用于部署代码。
 
 ```bash
 # 安装 Serverless Devs
 npm install -g @serverless-devs/s
 
-# 部署
-s deploy
+# 部署（仅更新代码，不更新函数配置）
+s deploy --type code
 ```
 
-环境变量需在 FC 控制台或 `s.yaml` 中配置 `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET`。
+环境变量需在 FC 控制台配置 `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET`。
 
 ## 项目结构
 
