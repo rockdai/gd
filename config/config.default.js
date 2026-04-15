@@ -8,8 +8,8 @@ const path = require('path');
 module.exports = appInfo => {
   const config = {};
 
-  // use appInfo.name as cookie sign key
-  config.keys = appInfo.name + '_1713168000000';
+  // use env var or appInfo.name as cookie sign key
+  config.keys = process.env.EGG_KEYS || (appInfo.name + '_' + Date.now());
 
   // close CSRF for API usage
   config.security = {

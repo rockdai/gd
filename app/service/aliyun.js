@@ -31,7 +31,7 @@ class AliyunService extends Service {
    */
   async getPublicIp() {
     const resp = await fetch(IP_ENDPOINT, { headers: { accept: 'text/plain' } });
-    if (!resp.ok) throw new Error(`Failed to fetch public ip: ${resp.status}`);
+    if (!resp.ok) throw new Error(`Failed to fetch public ip: ${resp.status} ${resp.statusText}`);
     const text = await resp.text();
     const m = String(text).match(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/);
     if (!m) throw new Error(`Failed to parse ip from response: ${JSON.stringify(text)}`);
@@ -129,16 +129,16 @@ class AliyunService extends Service {
   async addIpToWhitelist(ip, machines) {
     const credential = this.getCredential();
     const sourceCidrIp = ip.includes('/') ? ip : `${ip}/32`;
-    const remark = `gd-web@${this._formatDateTime()}`;
+    const description = `gd-web@${this._formatDateTime()}`;
     const results = [];
 
     for (const machine of machines) {
       try {
         if (machine.product === 'ecs') {
-          const result = await this._addIpToEcs(credential, machine, sourceCidrIp, remark);
+          const result = await this._addIpToEcs(credential, machine, sourceCidrIp, description);
           results.push({ ...machine, ...result });
         } else if (machine.product === 'swas-open') {
-          const result = await this._addIpToSwas(credential, machine, sourceCidrIp, remark);
+          const result = await this._addIpToSwas(credential, machine, sourceCidrIp, description);
           results.push({ ...machine, ...result });
         } else {
           results.push({ ...machine, status: 'skipped', message: `Unsupported product: ${machine.product}` });
@@ -189,7 +189,7 @@ class AliyunService extends Service {
   /**
    * Add IP to SWAS firewall
    */
-  async _addIpToSwas(credential, machine, sourceCidrIp, remark) {
+  async _addIpToSwas(credential, machine, sourceCidrIp, description) {
     const { regionId, instanceId } = machine;
 
     const client = new SWASClient({
@@ -205,7 +205,7 @@ class AliyunService extends Service {
         port: PORT_RANGE,
         ruleProtocol: 'TCP',
         sourceCidrIp,
-        remark,
+        remark: description,
       }],
     });
 

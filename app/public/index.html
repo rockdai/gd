@@ -357,7 +357,9 @@
 
       // Register service worker for PWA
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/public/sw.js').catch(() => {});
+        navigator.serviceWorker.register('/public/sw.js').catch(err => {
+          console.warn('Service worker registration failed:', err);
+        });
       }
     });
 
