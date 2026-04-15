@@ -8,7 +8,7 @@ vars:
 # 只部署代码，不更新函数配置。函数配置在阿里云控制台上管理。
 # 部署命令: s deploy --type code
 
-services:
+resources:
   # Web service (Egg.js PWA)
   gd-web:
     component: fc3
