@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const crypto = require('crypto');
 
 /**
  * @param {Egg.EggAppInfo} appInfo app info
@@ -22,6 +23,25 @@ module.exports = appInfo => {
   config.static = {
     prefix: '/public/',
     dir: path.join(appInfo.baseDir, 'app/public'),
+  };
+
+  // ---- JWT authentication ----
+  // Secret: use JWT_SECRET env var for token persistence across restarts,
+  // otherwise generate a random secret (tokens invalidated on restart).
+  config.jwt = {
+    secret: process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex'),
+    expiresIn: '24h',
+  };
+
+  // Register JWT auth middleware globally.
+  // Paths that do NOT require authentication are listed in skipPaths.
+  config.middleware = ['jwtAuth'];
+  config.jwtAuth = {
+    skipPaths: [
+      '/',            // HTML shell (contains login form)
+      '/api/login',   // Login endpoint itself
+      /^\/public\//,  // Static assets (JS, CSS, manifest, SW)
+    ],
   };
 
   // aliyun credentials – read from env or .aliyun.conf

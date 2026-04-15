@@ -295,12 +295,103 @@
 
     .result-success { color: #52c41a; }
     .result-error { color: #ff4d4f; }
+
+    /* Login overlay */
+    .login-overlay {
+      position: fixed;
+      inset: 0;
+      background: #f0f2f5;
+      z-index: 2000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .login-overlay.hidden { display: none; }
+
+    .login-card {
+      background: white;
+      border-radius: 12px;
+      padding: 32px 28px;
+      width: 90%;
+      max-width: 360px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+      text-align: center;
+    }
+
+    .login-card h2 {
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    .login-hint {
+      color: #999;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+
+    .login-input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      font-size: 15px;
+      outline: none;
+      margin-bottom: 14px;
+      transition: border-color 0.2s;
+      box-sizing: border-box;
+    }
+
+    .login-input:focus {
+      border-color: #1890ff;
+      box-shadow: 0 0 0 2px rgba(24,144,255,0.2);
+    }
+
+    .login-error {
+      color: #ff4d4f;
+      font-size: 13px;
+      margin-top: 12px;
+    }
+
+    /* Logout button in header */
+    .btn-logout {
+      position: absolute;
+      right: 16px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(255,255,255,0.2);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.4);
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn-logout:hover { background: rgba(255,255,255,0.35); }
+
+    .header { position: relative; }
   </style>
 </head>
 <body>
   <div class="header">
     <h1>🛡️ GD - 白名单管理</h1>
     <p>阿里云 ECS / 轻量应用服务器 防火墙白名单管理</p>
+    <button id="logoutBtn" class="btn-logout" style="display:none;" onclick="logout()">退出登录</button>
+  </div>
+
+  <!-- Login overlay -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-card">
+      <h2>🔐 身份验证</h2>
+      <p class="login-hint">请输入访问密码以继续</p>
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <input type="password" id="loginPassword" class="login-input" placeholder="输入密码" autocomplete="current-password" required />
+        <button type="submit" id="loginBtn" class="btn btn-primary btn-block">登录</button>
+      </form>
+      <p id="loginError" class="login-error" style="display:none;"></p>
+    </div>
   </div>
 
   <div class="container">
@@ -349,11 +440,98 @@
   <script>
     let currentIp = '';
     let machines = [];
+    let authToken = localStorage.getItem('gd_token') || '';
 
-    // Initialize
+    // =========== Auth helpers ===========
+
+    function authHeaders() {
+      return authToken ? { 'Authorization': 'Bearer ' + authToken } : {};
+    }
+
+    /** Authenticated fetch wrapper – redirects to login on 401 */
+    async function authFetch(url, opts = {}) {
+      opts.headers = Object.assign({}, opts.headers || {}, authHeaders());
+      const resp = await fetch(url, opts);
+      if (resp.status === 401) {
+        // Token expired or invalid
+        authToken = '';
+        localStorage.removeItem('gd_token');
+        showLoginOverlay();
+        throw new Error('AUTH_REQUIRED');
+      }
+      return resp;
+    }
+
+    function showLoginOverlay() {
+      document.getElementById('loginOverlay').classList.remove('hidden');
+      document.getElementById('logoutBtn').style.display = 'none';
+      document.getElementById('loginPassword').focus();
+    }
+
+    function hideLoginOverlay() {
+      document.getElementById('loginOverlay').classList.add('hidden');
+      document.getElementById('logoutBtn').style.display = 'block';
+    }
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      const btn = document.getElementById('loginBtn');
+      const errEl = document.getElementById('loginError');
+      const password = document.getElementById('loginPassword').value;
+
+      btn.disabled = true;
+      btn.textContent = '登录中...';
+      errEl.style.display = 'none';
+
+      try {
+        const resp = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password }),
+        });
+        const data = await resp.json();
+
+        if (data.success && data.token) {
+          authToken = data.token;
+          localStorage.setItem('gd_token', authToken);
+          hideLoginOverlay();
+          // Now load data
+          refreshIp();
+          refreshMachines();
+        } else {
+          errEl.textContent = data.message || '登录失败';
+          errEl.style.display = 'block';
+        }
+      } catch (err) {
+        errEl.textContent = '网络错误，请重试';
+        errEl.style.display = 'block';
+      }
+
+      btn.disabled = false;
+      btn.textContent = '登录';
+    }
+
+    function logout() {
+      authToken = '';
+      localStorage.removeItem('gd_token');
+      machines = [];
+      currentIp = '';
+      document.getElementById('machineListContainer').innerHTML = '<div class="empty-state">请先登录</div>';
+      document.getElementById('currentIp').textContent = '-';
+      showLoginOverlay();
+    }
+
+    // =========== Initialize ===========
+
     document.addEventListener('DOMContentLoaded', () => {
-      refreshIp();
-      refreshMachines();
+      if (authToken) {
+        // Try to use saved token – if it's expired, authFetch will redirect to login
+        hideLoginOverlay();
+        refreshIp();
+        refreshMachines();
+      } else {
+        showLoginOverlay();
+      }
 
       // Register service worker for PWA
       if ('serviceWorker' in navigator) {
@@ -362,6 +540,8 @@
         });
       }
     });
+
+    // =========== IP & Machine logic ===========
 
     async function refreshIp() {
       const el = document.getElementById('currentIp');
@@ -391,7 +571,7 @@
       container.innerHTML = '<div class="empty-state"><div class="loading-spinner"></div><p style="margin-top: 8px;">加载机器列表...</p></div>';
 
       try {
-        const resp = await fetch('/api/machines');
+        const resp = await authFetch('/api/machines');
         const data = await resp.json();
         if (data.success) {
           machines = data.machines || [];
@@ -400,6 +580,7 @@
           container.innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(data.message) + '</div>';
         }
       } catch (err) {
+        if (err.message === 'AUTH_REQUIRED') return; // handled by authFetch
         container.innerHTML = '<div class="empty-state">网络错误，无法加载机器列表</div>';
       }
 
@@ -488,7 +669,7 @@
           })),
         };
 
-        const resp = await fetch('/api/whitelist', {
+        const resp = await authFetch('/api/whitelist', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -502,11 +683,14 @@
           showToast(data.message || '添加失败', 'error');
         }
       } catch (err) {
+        if (err.message === 'AUTH_REQUIRED') return;
         showToast('网络错误', 'error');
       }
 
       updateSubmitBtn();
     }
+
+    // =========== UI helpers ===========
 
     function showResults(results) {
       const card = document.getElementById('resultCard');
