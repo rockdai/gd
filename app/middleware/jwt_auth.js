@@ -41,7 +41,8 @@ module.exports = (options, app) => {
       });
       ctx.state.user = decoded;
       await next();
-    } catch (_err) {
+    } catch (err) {
+      ctx.logger.debug('[jwtAuth] Token verification failed: %s', err.message);
       ctx.status = 401;
       ctx.body = { success: false, message: 'Invalid or expired token' };
     }

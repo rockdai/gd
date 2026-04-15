@@ -61,9 +61,12 @@ class AuthController extends Controller {
       return;
     }
 
-    // --- timing-safe comparison (hash first so lengths always match) ---
-    const hash = str => crypto.createHash('sha256').update(str).digest();
-    const isValid = crypto.timingSafeEqual(hash(password), hash(configuredPassword));
+    // --- timing-safe comparison ---
+    // HMAC normalises both values to a fixed-length digest so that
+    // crypto.timingSafeEqual can be used regardless of input lengths.
+    // This is a runtime comparison – the password is NOT stored.
+    const hmac = str => crypto.createHmac('sha256', 'gd-auth-compare').update(str).digest();
+    const isValid = crypto.timingSafeEqual(hmac(password), hmac(configuredPassword));
 
     if (!isValid) {
       attempts.push(now);
