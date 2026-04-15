@@ -1,0 +1,16 @@
+{
+  "name": "GD 白名单管理",
+  "short_name": "GD",
+  "description": "阿里云 ECS / 轻量应用服务器 防火墙白名单管理工具",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f0f2f5",
+  "theme_color": "#1890ff",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

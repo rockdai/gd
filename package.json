@@ -1,13 +1,29 @@
 {
-  "name": "aliyun-ecs-dsec",
-  "version": "0.0.0",
+  "name": "gd",
+  "version": "1.0.0",
   "private": true,
-  "repository": "git@github.com:rockdai/aliyun-ecs-dsec.git",
+  "repository": "git@github.com:rockdai/gd.git",
+  "egg": {
+    "framework": "egg"
+  },
   "bin": {
     "ecs-dsec-handler": "bin/ecs-dsec-handler.js"
   },
+  "scripts": {
+    "dev": "egg-bin dev",
+    "start": "egg-scripts start --daemon --title=gd-web",
+    "stop": "egg-scripts stop --title=gd-web",
+    "test": "egg-bin test",
+    "cov": "egg-bin cov"
+  },
   "dependencies": {
     "@alicloud/ecs20140526": "6.1.0",
-    "@alicloud/swas-open20200601": "4.0.0"
+    "@alicloud/swas-open20200601": "4.0.0",
+    "egg": "^3.34.0",
+    "egg-scripts": "^3.1.0",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "egg-bin": "^6.13.0"
   }
 }
