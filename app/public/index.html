@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#1890ff">
+  <meta name="description" content="阿里云机器白名单管理工具">
+  <title>GD - 白名单管理</title>
+  <link rel="manifest" href="/public/manifest.json">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      min-height: 100vh;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #1890ff, #096dd9);
+      color: white;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+
+    .header h1 {
+      font-size: 22px;
+      font-weight: 600;
+    }
+
+    .header p {
+      font-size: 14px;
+      opacity: 0.85;
+      margin-top: 4px;
+    }
+
+    .container {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 16px;
+    }
+
+    .card {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #1890ff;
+    }
+
+    .ip-display {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .ip-value {
+      font-size: 24px;
+      font-weight: 700;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      color: #333;
+      flex: 1;
+    }
+
+    .ip-loading {
+      color: #999;
+      font-size: 16px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: #1890ff;
+      color: white;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #096dd9;
+    }
+
+    .btn-success {
+      background: #52c41a;
+      color: white;
+    }
+
+    .btn-success:hover:not(:disabled) {
+      background: #389e0d;
+    }
+
+    .btn-small {
+      padding: 4px 12px;
+      font-size: 13px;
+    }
+
+    .btn-block {
+      display: flex;
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+    }
+
+    .ip-input-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .ip-input-group input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .ip-input-group input:focus {
+      border-color: #1890ff;
+      box-shadow: 0 0 0 2px rgba(24,144,255,0.2);
+    }
+
+    .machine-list {
+      list-style: none;
+    }
+
+    .machine-item {
+      display: flex;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid #f0f0f0;
+      gap: 12px;
+    }
+
+    .machine-item:last-child {
+      border-bottom: none;
+    }
+
+    .machine-item input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #1890ff;
+      flex-shrink: 0;
+    }
+
+    .machine-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .machine-name {
+      font-weight: 500;
+      font-size: 14px;
+      word-break: break-all;
+    }
+
+    .machine-meta {
+      font-size: 12px;
+      color: #999;
+      margin-top: 2px;
+    }
+
+    .machine-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .badge-ecs {
+      background: #e6f7ff;
+      color: #1890ff;
+    }
+
+    .badge-swas {
+      background: #f6ffed;
+      color: #52c41a;
+    }
+
+    .badge-status {
+      background: #f0f0f0;
+      color: #666;
+    }
+
+    .select-all {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      border-bottom: 2px solid #f0f0f0;
+      margin-bottom: 4px;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .select-all input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #1890ff;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #333;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      max-width: 90vw;
+      text-align: center;
+    }
+
+    .toast.show {
+      opacity: 1;
+    }
+
+    .toast.error {
+      background: #ff4d4f;
+    }
+
+    .toast.success {
+      background: #52c41a;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 24px;
+      color: #999;
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #ccc;
+      border-top-color: #1890ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .result-item {
+      padding: 8px 0;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 13px;
+    }
+
+    .result-item:last-child {
+      border-bottom: none;
+    }
+
+    .result-success { color: #52c41a; }
+    .result-error { color: #ff4d4f; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🛡️ GD - 白名单管理</h1>
+    <p>阿里云 ECS / 轻量应用服务器 防火墙白名单管理</p>
+  </div>
+
+  <div class="container">
+    <!-- Current IP Card -->
+    <div class="card">
+      <div class="card-title">当前公网 IP</div>
+      <div class="ip-display">
+        <span id="currentIp" class="ip-loading">获取中...</span>
+        <button class="btn btn-small btn-primary" onclick="refreshIp()">刷新</button>
+      </div>
+      <div class="ip-input-group">
+        <input type="text" id="customIp" placeholder="输入指定 IP（留空使用当前 IP）" />
+      </div>
+    </div>
+
+    <!-- Machine List Card -->
+    <div class="card">
+      <div class="card-title">
+        机器列表
+        <button class="btn btn-small btn-primary" onclick="refreshMachines()" style="margin-left: 8px;">刷新</button>
+      </div>
+      <div id="machineListContainer">
+        <div class="empty-state">
+          <div class="loading-spinner"></div>
+          <p style="margin-top: 8px;">加载机器列表...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Action Card -->
+    <div class="card">
+      <button id="submitBtn" class="btn btn-success btn-block" onclick="addToWhitelist()" disabled>
+        🚀 一键添加到白名单
+      </button>
+    </div>
+
+    <!-- Result Card (hidden by default) -->
+    <div class="card" id="resultCard" style="display: none;">
+      <div class="card-title">执行结果</div>
+      <div id="resultContainer"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+    let currentIp = '';
+    let machines = [];
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', () => {
+      refreshIp();
+      refreshMachines();
+
+      // Register service worker for PWA
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/public/sw.js').catch(() => {});
+      }
+    });
+
+    async function refreshIp() {
+      const el = document.getElementById('currentIp');
+      el.className = 'ip-loading';
+      el.textContent = '获取中...';
+
+      try {
+        const resp = await fetch('/api/ip');
+        const data = await resp.json();
+        if (data.success) {
+          currentIp = data.ip;
+          el.className = 'ip-value';
+          el.textContent = data.ip;
+        } else {
+          el.textContent = '获取失败';
+          showToast(data.message || '获取 IP 失败', 'error');
+        }
+      } catch (err) {
+        el.textContent = '获取失败';
+        showToast('网络错误，无法获取 IP', 'error');
+      }
+
+      updateSubmitBtn();
+    }
+
+    async function refreshMachines() {
+      const container = document.getElementById('machineListContainer');
+      container.innerHTML = '<div class="empty-state"><div class="loading-spinner"></div><p style="margin-top: 8px;">加载机器列表...</p></div>';
+
+      try {
+        const resp = await fetch('/api/machines');
+        const data = await resp.json();
+        if (data.success) {
+          machines = data.machines || [];
+          renderMachines();
+        } else {
+          container.innerHTML = '<div class="empty-state">加载失败: ' + escapeHtml(data.message) + '</div>';
+        }
+      } catch (err) {
+        container.innerHTML = '<div class="empty-state">网络错误，无法加载机器列表</div>';
+      }
+
+      updateSubmitBtn();
+    }
+
+    function renderMachines() {
+      const container = document.getElementById('machineListContainer');
+
+      if (machines.length === 0) {
+        container.innerHTML = '<div class="empty-state">未找到机器实例</div>';
+        return;
+      }
+
+      let html = '';
+      html += '<div class="select-all">';
+      html += '<input type="checkbox" id="selectAll" onchange="toggleSelectAll()" />';
+      html += '<label for="selectAll">全选 (' + machines.length + ' 台机器)</label>';
+      html += '</div>';
+      html += '<ul class="machine-list">';
+
+      machines.forEach((m, i) => {
+        const badgeClass = m.product === 'ecs' ? 'badge-ecs' : 'badge-swas';
+        const productLabel = m.product === 'ecs' ? 'ECS' : '轻量服务器';
+        const ips = (m.publicIpAddress || []).join(', ') || '无公网 IP';
+        html += '<li class="machine-item">';
+        html += '<input type="checkbox" class="machine-checkbox" data-index="' + i + '" onchange="updateSubmitBtn()" />';
+        html += '<div class="machine-info">';
+        html += '<div class="machine-name">' + escapeHtml(m.instanceName) + '</div>';
+        html += '<div class="machine-meta">' + escapeHtml(m.regionId) + ' · ' + escapeHtml(ips) + '</div>';
+        html += '<div class="machine-meta">' + escapeHtml(m.instanceId) + '</div>';
+        html += '</div>';
+        html += '<span class="machine-badge ' + badgeClass + '">' + productLabel + '</span>';
+        html += '</li>';
+      });
+
+      html += '</ul>';
+      container.innerHTML = html;
+    }
+
+    function toggleSelectAll() {
+      const checked = document.getElementById('selectAll').checked;
+      document.querySelectorAll('.machine-checkbox').forEach(cb => {
+        cb.checked = checked;
+      });
+      updateSubmitBtn();
+    }
+
+    function getSelectedMachines() {
+      const selected = [];
+      document.querySelectorAll('.machine-checkbox:checked').forEach(cb => {
+        const idx = parseInt(cb.dataset.index, 10);
+        if (machines[idx]) selected.push(machines[idx]);
+      });
+      return selected;
+    }
+
+    function updateSubmitBtn() {
+      const btn = document.getElementById('submitBtn');
+      const selected = getSelectedMachines();
+      const ip = document.getElementById('customIp').value.trim() || currentIp;
+      btn.disabled = !ip || selected.length === 0;
+      btn.textContent = selected.length > 0
+        ? '🚀 添加到 ' + selected.length + ' 台机器的白名单'
+        : '🚀 一键添加到白名单';
+    }
+
+    async function addToWhitelist() {
+      const ip = document.getElementById('customIp').value.trim() || currentIp;
+      const selected = getSelectedMachines();
+
+      if (!ip || selected.length === 0) return;
+
+      const btn = document.getElementById('submitBtn');
+      btn.disabled = true;
+      btn.textContent = '⏳ 添加中...';
+
+      try {
+        const body = {
+          ip,
+          machines: selected.map(m => ({
+            product: m.product,
+            instanceId: m.instanceId,
+            regionId: m.regionId,
+            securityGroupId: m.securityGroupIds ? m.securityGroupIds[0] : undefined,
+          })),
+        };
+
+        const resp = await fetch('/api/whitelist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        const data = await resp.json();
+        if (data.success) {
+          showResults(data.results);
+          showToast('白名单添加完成', 'success');
+        } else {
+          showToast(data.message || '添加失败', 'error');
+        }
+      } catch (err) {
+        showToast('网络错误', 'error');
+      }
+
+      updateSubmitBtn();
+    }
+
+    function showResults(results) {
+      const card = document.getElementById('resultCard');
+      const container = document.getElementById('resultContainer');
+      card.style.display = 'block';
+
+      let html = '';
+      for (const r of results) {
+        const cls = r.status === 'success' ? 'result-success' : 'result-error';
+        const icon = r.status === 'success' ? '✅' : '❌';
+        html += '<div class="result-item ' + cls + '">';
+        html += icon + ' ' + escapeHtml(r.instanceId) + ' (' + escapeHtml(r.regionId) + ') - ' + escapeHtml(r.message);
+        html += '</div>';
+      }
+      container.innerHTML = html;
+    }
+
+    function showToast(msg, type) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = 'toast show' + (type ? ' ' + type : '');
+      setTimeout(() => {
+        toast.className = 'toast';
+      }, 3000);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Listen to custom IP input changes
+    document.addEventListener('input', (e) => {
+      if (e.target.id === 'customIp') updateSubmitBtn();
+    });
+  </script>
+</body>
+</html>

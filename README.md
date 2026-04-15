@@ -1,121 +1,174 @@
-# aliyun-ecs-dsec
+# GD - 阿里云白名单管理
 
-一个用于**自动更新阿里云安全组 / 轻量应用服务器防火墙规则**的小工具。
-
-## 背景
-
-我家里有两条宽带（电信 / 联通）。路由器每次重新拨号联网后，家庭公网 IP 通常会变化。
-
-为避免把云上资源（ECS / 轻量应用服务器）完全暴露在公网，我在家里的 NAS 上配置了 DDNS，把当前公网 IP 绑定到 `keydiary.dev` 的子域名（以及其他自用域名）上。本项目部署在**阿里云函数计算 FC**，通过定时触发运行：
-
-1. 解析 DDNS 域名 → 得到当前家庭公网 IP
-2. 调用阿里云 OpenAPI → 更新对应资源的安全规则（备注会带上域名和时间戳）
-
-这样云资源可以只放行来自家庭网络的访问，从而增加一层安全防护。
+阿里云 **ECS / 轻量应用服务器** 防火墙白名单管理工具。
 
 ## 功能
 
-- 支持 **轻量应用服务器（swas-open）**：更新防火墙规则（`ModifyFirewallRule`）
-- （代码已预留）支持 **ECS（ecs）**：更新安全组规则（`ModifySecurityGroupRule`）
-- 提供一个**本地可执行的命令行工具** `ecs-dsec-handler`：
-  - 获取当前设备公网 IP（`https://get-ip.rockdai.com`）
-  - 为每台实例创建/维护一条备注为 `ecs-dsec-handler` 的规则，用于“外出办公临时放行”
-  - 不会覆盖 FC 任务用于“家庭宽带 DDNS”场景的规则
-- 通过 `config.js` 配置：
-  - 需要解析的域名（DDNS）
-  - 需要更新的资源（region / instanceId / ruleId 等）
+### 1) Web 服务（PWA）
 
-> 注意：当前实现把端口范围设置为 `1/65535`，协议为 TCP（见 `index.js`）。如果你只想放行特定端口，建议把范围收窄。
+基于 [Egg.js](https://eggjs.org/) 的 Progressive Web App，提供可视化界面：
 
-## 运行方式
+- 自动获取当前设备公网 IP（使用 `get-ip.rockdai.com`）
+- 一键将当前公网 IP 添加到用户机器白名单
+- 支持添加指定 IP 到机器白名单
+- 基于 AK/SK 自动拉取用户的阿里云 ECS 和轻量应用服务器列表
+- 支持勾选指定机器进行白名单配置
 
-### 1) 凭证（AK）
+### 2) 后台定时服务
 
-在函数计算 FC（或本地运行）时需要提供 AK，支持两种方式：
+保留原有的 FC 定时触发服务（`index.js`），用于定期根据 DDNS 域名解析结果更新机器白名单。
 
-A) 环境变量：
+### 3) 命令行工具
+
+`ecs-dsec-handler`：获取当前设备公网 IP，为每台实例创建/维护防火墙规则。
+
+## 快速开始
+
+### 凭证配置
+
+支持两种方式提供阿里云 AK/SK：
+
+**A) 环境变量（推荐用于 FC 部署）：**
 
 - `ACCESS_KEY_ID`
 - `ACCESS_KEY_SECRET`
 
-B) 本地配置文件（推荐用于命令行，不用把敏感信息写进命令历史）：
-
-- 在项目根目录创建 `.aliyun.conf`（key=value 格式），可从 `.aliyun.conf.example` 复制
-- 该文件已加入 `.gitignore`，**不要提交**
-
-建议使用**最小权限**的 RAM 子账号/角色，只授予修改对应安全组/防火墙规则所需的权限。
-
-### 2) 配置文件
-
-编辑 `config.js`：
-
-- `DOMAIN`：需要解析的 DDNS 域名列表（例如电信 / 联通 各一个域名）
-- `RuleConfig`：需要更新的规则列表
-  - `product`: `swas-open` 或 `ecs`
-  - `regionId`
-  - `instanceId`（swas-open）/ `groupId`（ecs，若启用）
-  - `ruleList`: `{ name: <domain>, id: <ruleId> }`
-
-### 3) 本地调试（FC handler）
-
-Node.js 18+（FC 运行时同样支持 fetch）：
+**B) 本地配置文件（推荐用于本地开发）：**
 
 ```bash
-npm i
-ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node -e "require('./index').handler({}, {}, console.log)"
-```
-
-### 4) 命令行工具：外出办公临时放行当前设备 IP
-
-该命令会：
-
-1. 调用 `https://get-ip.rockdai.com` 获取当前设备公网 IP
-2. 在每台实例上创建/更新一条 `remark=ecs-dsec-handler` 的规则（端口 `1/65535`，TCP）
-
-**幂等/冲突处理策略：**
-
-- 若已存在 `remark=ecs-dsec-handler` 的规则：会把这条规则的 `sourceCidrIp` 更新为当前 IP（重复执行无副作用）
-- 若当前 IP 已经被其它规则放行（可能来自 FC 的 DDNS 规则）：阿里云不允许重复创建同 IP 规则，此时会直接输出提示并退出（视为成功）
-
-使用方式：
-
-```bash
-npm i
-
-# 方式 A：用配置文件（推荐）
 cp .aliyun.conf.example .aliyun.conf
 # 编辑 .aliyun.conf 填入 ACCESS_KEY_ID / ACCESS_KEY_SECRET
+```
+
+> 建议使用**最小权限**的 RAM 子账号/角色。
+
+### 本地开发（Web 服务）
+
+```bash
+npm i
+npm run dev
+# 访问 http://127.0.0.1:7001
+```
+
+### 命令行工具
+
+```bash
+npm i
+
+# 使用配置文件
 node bin/ecs-dsec-handler.js
 
-# 方式 B：用环境变量
+# 使用环境变量
 ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node bin/ecs-dsec-handler.js
 
 # 指定 IP / dry-run
-ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node bin/ecs-dsec-handler.js --ip 1.2.3.4
-ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node bin/ecs-dsec-handler.js --dry-run
-
-# 或者 npm install 后用 bin（等价）
-# ./node_modules/.bin/ecs-dsec-handler
+node bin/ecs-dsec-handler.js --ip 1.2.3.4
+node bin/ecs-dsec-handler.js --dry-run
 ```
 
-### 5) 部署到函数计算 FC
+### 本地调试（定时任务 handler）
 
-- 运行时：Node.js 18+
-- 触发器：定时触发（例如每 5~10 分钟）
-- 环境变量：配置 `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET`
+```bash
+ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node -e "require('./index').handler({}, {}, console.log)"
+```
 
-## 开发/协作约定（重要）
+## 部署到函数计算 FC
+
+项目通过 [Serverless Devs](https://github.com/Serverless-Devs/Serverless-Devs) 部署到阿里云函数计算，配置见 `s.yaml`。
+
+包含两个函数：
+
+| 函数 | 说明 | 触发方式 |
+|------|------|----------|
+| `gd-web` | Egg.js Web 服务（PWA） | HTTP 触发器 |
+| `gd-cron` | 定时更新白名单（原 index.js） | 定时触发器（每 5 分钟） |
+
+```bash
+# 安装 Serverless Devs
+npm install -g @serverless-devs/s
+
+# 部署
+s deploy
+```
+
+环境变量需在 FC 控制台或 `s.yaml` 中配置 `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET`。
+
+## 项目结构
+
+```
+├── app/                    # Egg.js 应用
+│   ├── controller/         # 控制器
+│   │   ├── home.js         # 首页（PWA 入口）
+│   │   └── api.js          # API 接口
+│   ├── service/            # 服务层
+│   │   └── aliyun.js       # 阿里云 SDK 服务
+│   ├── public/             # 静态资源
+│   │   ├── index.html      # PWA 页面
+│   │   ├── manifest.json   # PWA manifest
+│   │   └── sw.js           # Service Worker
+│   └── router.js           # 路由定义
+├── config/                 # Egg.js 配置
+│   ├── config.default.js   # 默认配置（含 AK/SK、regions）
+│   └── plugin.js           # 插件配置
+├── lib/                    # 公共库
+│   ├── aliyun-conf.js      # AK/SK 读取
+│   ├── handler-swas-open.js # 轻量服务器处理
+│   └── public-ip.js        # 公网 IP 获取
+├── bin/                    # 命令行工具
+│   └── ecs-dsec-handler.js
+├── index.js                # FC 定时任务 handler
+├── config.js               # 定时任务规则配置
+├── bootstrap.js            # FC 自定义运行时启动入口
+├── s.yaml                  # Serverless Devs 部署配置
+└── package.json
+```
+
+## API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | PWA 首页 |
+| GET | `/api/ip` | 获取当前设备公网 IP |
+| GET | `/api/machines` | 获取用户所有机器列表（ECS + 轻量服务器） |
+| POST | `/api/whitelist` | 添加 IP 到指定机器白名单 |
+
+### POST /api/whitelist
+
+```json
+{
+  "ip": "1.2.3.4",
+  "machines": [
+    {
+      "product": "swas-open",
+      "instanceId": "xxx",
+      "regionId": "cn-hangzhou"
+    },
+    {
+      "product": "ecs",
+      "instanceId": "xxx",
+      "regionId": "cn-hangzhou",
+      "securityGroupId": "sg-xxx"
+    }
+  ]
+}
+```
+
+## 配置
+
+### Egg.js 配置（`config/config.default.js`）
+
+- `aliyun.accessKeyId` / `aliyun.accessKeySecret`：阿里云凭证（默认读取环境变量）
+- `aliyun.regions`：扫描机器列表时覆盖的地域
+
+### 定时任务配置（`config.js`）
+
+- `DOMAIN`：需要解析的 DDNS 域名列表
+- `RuleConfig`：需要更新的规则列表
+
+## 开发/协作约定
 
 - **对该 GitHub 仓库的任何改动都请走 PR**：新建分支 → push 分支 → 提 PR → 评审合并
 - 不要直接 push 到 `main`
-
-## 实现细节
-
-- DNS 解析使用：阿里 DNS 的 HTTP 解析接口：
-  - `http://dns.alidns.com/resolve?name=<domain>&type=1`
-- 更新规则：
-  - swas-open: `ModifyFirewallRuleRequest`（`@alicloud/swas-open20200601`）
-  - ecs: `ModifySecurityGroupRuleRequest`（`@alicloud/ecs20140526`）
 
 ## License
 

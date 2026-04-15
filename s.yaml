@@ -1,0 +1,61 @@
+edition: 3.0.0
+name: gd-whitelist
+access: "default"
+
+vars:
+  region: cn-hangzhou
+
+services:
+  # Web service (Egg.js PWA)
+  gd-web:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: gd-web
+      description: "GD 白名单管理 Web 服务 (Egg.js PWA)"
+      runtime: custom.debian10
+      memorySize: 512
+      timeout: 60
+      diskSize: 512
+      code: ./
+      handler: index.handler
+      customRuntimeConfig:
+        command:
+          - node
+        args:
+          - bootstrap.js
+        port: 9000
+      environmentVariables:
+        NODE_ENV: production
+      triggers:
+        - triggerName: httpTrigger
+          triggerType: http
+          qualifier: LATEST
+          triggerConfig:
+            authType: anonymous
+            methods:
+              - GET
+              - POST
+
+  # Background service (periodic whitelist update via timer trigger)
+  gd-cron:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: gd-cron
+      description: "GD 定时更新白名单 (原 index.js)"
+      runtime: nodejs18
+      memorySize: 256
+      timeout: 120
+      code: ./
+      handler: index.handler
+      environmentVariables:
+        NODE_ENV: production
+      triggers:
+        - triggerName: timerTrigger
+          triggerType: timer
+          qualifier: LATEST
+          triggerConfig:
+            cronExpression: "0 */5 * * * *"
+            enable: true
+            payload: ""

@@ -133,3 +133,8 @@ package-lock.json
 
 # Aliyun credentials (DO NOT COMMIT)
 .aliyun.conf
+
+# Egg.js
+run/
+logs/
+typings/
