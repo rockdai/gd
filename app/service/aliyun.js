@@ -5,7 +5,6 @@ const { default: ECSClient, DescribeInstancesRequest, DescribeSecurityGroupsRequ
 const { default: SWASClient, ListInstancesRequest, ListFirewallRulesRequest, CreateFirewallRulesRequest } = require('@alicloud/swas-open20200601');
 const { resolveCredentials } = require('../../lib/aliyun-conf');
 
-const IP_ENDPOINT = 'https://get-ip.rockdai.com';
 const PORT_RANGE = '1/65535';
 
 class AliyunService extends Service {
@@ -24,18 +23,6 @@ class AliyunService extends Service {
       throw new Error('Missing Alibaba Cloud credentials. Set ACCESS_KEY_ID/ACCESS_KEY_SECRET env vars or create .aliyun.conf');
     }
     return { accessKeyId: cred.accessKeyId, accessKeySecret: cred.accessKeySecret };
-  }
-
-  /**
-   * Fetch the caller's public IP from get-ip.rockdai.com
-   */
-  async getPublicIp() {
-    const resp = await fetch(IP_ENDPOINT, { headers: { accept: 'text/plain' } });
-    if (!resp.ok) throw new Error(`Failed to fetch public ip: ${resp.status} ${resp.statusText}`);
-    const text = await resp.text();
-    const m = String(text).match(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/);
-    if (!m) throw new Error(`Failed to parse ip from response: ${JSON.stringify(text)}`);
-    return m[1];
   }
 
   /**

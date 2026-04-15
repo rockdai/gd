@@ -8,7 +8,7 @@
 
 基于 [Egg.js](https://eggjs.org/) 的 Progressive Web App，提供可视化界面：
 
-- 自动获取当前设备公网 IP（使用 `get-ip.rockdai.com`）
+- 前端直接调用 `get-ip.rockdai.com` 获取当前设备公网 IP（客户端侧获取真实 IP）
 - 一键将当前公网 IP 添加到用户机器白名单
 - 支持添加指定 IP 到机器白名单
 - 基于 AK/SK 自动拉取用户的阿里云 ECS 和轻量应用服务器列表
@@ -128,9 +128,10 @@ s deploy
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/` | PWA 首页 |
-| GET | `/api/ip` | 获取当前设备公网 IP |
 | GET | `/api/machines` | 获取用户所有机器列表（ECS + 轻量服务器） |
 | POST | `/api/whitelist` | 添加 IP 到指定机器白名单 |
+
+> 公网 IP 获取由前端直接调用 `https://get-ip.rockdai.com`，确保拿到客户端的真实 IP。
 
 ### POST /api/whitelist
 

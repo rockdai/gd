@@ -369,19 +369,18 @@
       el.textContent = '获取中...';
 
       try {
-        const resp = await fetch('/api/ip');
-        const data = await resp.json();
-        if (data.success) {
-          currentIp = data.ip;
-          el.className = 'ip-value';
-          el.textContent = data.ip;
-        } else {
-          el.textContent = '获取失败';
-          showToast(data.message || '获取 IP 失败', 'error');
-        }
+        // Fetch public IP directly from the browser so we get the client's real IP
+        const resp = await fetch('https://get-ip.rockdai.com', { headers: { accept: 'text/plain' } });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const text = await resp.text();
+        const m = text.match(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/);
+        if (!m) throw new Error('无法解析 IP');
+        currentIp = m[1];
+        el.className = 'ip-value';
+        el.textContent = currentIp;
       } catch (err) {
         el.textContent = '获取失败';
-        showToast('网络错误，无法获取 IP', 'error');
+        showToast('无法获取公网 IP: ' + err.message, 'error');
       }
 
       updateSubmitBtn();

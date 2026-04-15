@@ -4,22 +4,6 @@ const { Controller } = require('egg');
 
 class ApiController extends Controller {
   /**
-   * GET /api/ip
-   * Return the caller's public IP, fetched from get-ip.rockdai.com
-   */
-  async ip() {
-    const { ctx } = this;
-    try {
-      const ip = await ctx.service.aliyun.getPublicIp();
-      ctx.body = { success: true, ip };
-    } catch (err) {
-      ctx.logger.error('[api/ip] Failed to get public IP:', err);
-      ctx.status = 500;
-      ctx.body = { success: false, message: err.message };
-    }
-  }
-
-  /**
    * GET /api/machines
    * List all user machines (ECS instances + SWAS lightweight servers)
    */

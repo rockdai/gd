@@ -10,7 +10,6 @@ module.exports = app => {
   router.get('/', controller.home.index);
 
   // API routes
-  router.get('/api/ip', controller.api.ip);
   router.get('/api/machines', controller.api.machines);
   router.post('/api/whitelist', controller.api.addWhitelist);
 };
