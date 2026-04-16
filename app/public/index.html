@@ -96,6 +96,12 @@
       font-size: 16px;
     }
 
+    .ip-location {
+      font-size: 12px;
+      color: #999;
+      margin-left: 4px;
+    }
+
     .btn {
       display: inline-flex;
       align-items: center;
@@ -455,7 +461,7 @@
     <div class="card">
       <div class="card-title">当前公网 IP</div>
       <div class="ip-display">
-        <span id="currentIp" class="ip-loading">获取中...</span>
+        <span id="currentIp" class="ip-loading">获取中...</span><span id="ipLocation" class="ip-location"></span>
         <button class="btn btn-small btn-primary" onclick="refreshIp()">刷新</button>
       </div>
       <div class="ip-input-group">
@@ -603,6 +609,7 @@
       currentIp = '';
       document.getElementById('machineListContainer').innerHTML = '<div class="empty-state">请先登录</div>';
       document.getElementById('currentIp').textContent = '-';
+      document.getElementById('ipLocation').textContent = '';
       showLoginOverlay();
     }
 
@@ -630,8 +637,10 @@
 
     async function refreshIp() {
       const el = document.getElementById('currentIp');
+      const locEl = document.getElementById('ipLocation');
       el.className = 'ip-loading';
       el.textContent = '获取中...';
+      locEl.textContent = '';
 
       try {
         // Fetch public IP directly from the browser so we get the client's real IP
@@ -643,6 +652,17 @@
         currentIp = m[1];
         el.className = 'ip-value';
         el.textContent = currentIp;
+
+        // Best-effort: fetch IP geolocation, ignore any errors
+        const fetchedIp = currentIp;
+        fetch('https://ip.im/' + encodeURIComponent(fetchedIp), { headers: { accept: 'application/json' } })
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+          .then(function (data) {
+            if (currentIp !== fetchedIp) return; // stale response
+            const parts = [data.country, data.province, data.city, data.isp].filter(Boolean);
+            if (parts.length) locEl.textContent = parts.join(' ');
+          })
+          .catch(function () {});
       } catch (err) {
         el.textContent = '获取失败';
         showToast('无法获取公网 IP: ' + err.message, 'error');
