@@ -6,7 +6,7 @@ vars:
   region: cn-hangzhou
 
 # 只部署代码，不更新函数配置。函数配置在阿里云控制台上管理。
-# 部署命令: s deploy --type code
+# 部署命令: s deploy --function code --assume-yes
 
 resources:
   # Web service (Egg.js PWA)
