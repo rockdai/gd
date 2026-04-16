@@ -389,7 +389,7 @@
 
     .header { position: relative; }
 
-    /* Collapsible GFW section */
+    /* Collapsible section for tagged machines */
     .gfw-section {
       border-top: 1px dashed #d9d9d9;
       margin-top: 8px;
@@ -695,7 +695,7 @@
         html += '<div class="gfw-section">';
         html += '<div class="gfw-toggle" onclick="toggleGfwSection()">';
         html += '<span class="arrow" id="gfwArrow">▶</span>';
-        html += ' GFW 机器 (' + gfwMachines.length + ' 台)';
+        html += ' 更多机器 (' + gfwMachines.length + ' 台)';
         html += '</div>';
         html += '<ul class="machine-list gfw-machines" id="gfwMachines">';
         gfwMachines.forEach(({ machine: m, index: i }) => {
