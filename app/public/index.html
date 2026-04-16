@@ -733,7 +733,11 @@
 
     function toggleSelectAll() {
       const checked = document.getElementById('selectAll').checked;
+      const gfwContainer = document.getElementById('gfwMachines');
+      const gfwCollapsed = gfwContainer && !gfwContainer.classList.contains('expanded');
       document.querySelectorAll('.machine-checkbox').forEach(cb => {
+        // Skip checkboxes inside collapsed GFW section
+        if (gfwCollapsed && gfwContainer && gfwContainer.contains(cb)) return;
         cb.checked = checked;
       });
       updateSubmitBtn();
