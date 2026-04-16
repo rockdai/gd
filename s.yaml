@@ -16,7 +16,6 @@ resources:
       region: ${vars.region}
       functionName: gd-web
       code: ./
-      handler: index.handler
 
   # 定时更新白名单（复用已有函数 ecs-dsec）
   ecs-dsec:
@@ -25,4 +24,3 @@ resources:
       region: ${vars.region}
       functionName: ecs-dsec
       code: ./
-      handler: index.handler
