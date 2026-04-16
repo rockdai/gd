@@ -77,6 +77,7 @@ class AliyunService extends Service {
       publicIpAddress: inst.publicIpAddress?.ipAddress || [],
       status: inst.status,
       securityGroupIds: inst.securityGroupIds?.securityGroupId || [],
+      tags: (inst.tags?.tag || []).map(t => ({ key: t.tagKey, value: t.tagValue })),
     }));
   }
 
@@ -105,6 +106,7 @@ class AliyunService extends Service {
       regionId,
       publicIpAddress: inst.publicIpAddress ? [ inst.publicIpAddress ] : [],
       status: inst.status,
+      tags: (inst.tags || []).map(t => ({ key: t.key, value: t.value })),
     }));
   }
 

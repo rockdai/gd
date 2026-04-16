@@ -19,7 +19,11 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       background: #f0f2f5;
       color: #333;
-      min-height: 100vh;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     .header {
@@ -28,6 +32,7 @@
       padding: 20px;
       text-align: center;
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      flex-shrink: 0;
     }
 
     .header h1 {
@@ -45,6 +50,16 @@
       max-width: 640px;
       margin: 0 auto;
       padding: 16px;
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      width: 100%;
+    }
+
+    .container::-webkit-scrollbar {
+      display: none;
     }
 
     .card {
@@ -305,6 +320,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: auto;
     }
 
     .login-overlay.hidden { display: none; }
@@ -372,6 +388,46 @@
     .btn-logout:hover { background: rgba(255,255,255,0.35); }
 
     .header { position: relative; }
+
+    /* Collapsible GFW section */
+    .gfw-section {
+      border-top: 1px dashed #d9d9d9;
+      margin-top: 8px;
+      padding-top: 4px;
+    }
+
+    .gfw-toggle {
+      display: flex;
+      align-items: center;
+      padding: 8px 0;
+      cursor: pointer;
+      font-size: 13px;
+      color: #999;
+      user-select: none;
+      gap: 4px;
+    }
+
+    .gfw-toggle:active {
+      opacity: 0.7;
+    }
+
+    .gfw-toggle .arrow {
+      display: inline-block;
+      transition: transform 0.2s;
+      font-size: 10px;
+    }
+
+    .gfw-toggle .arrow.expanded {
+      transform: rotate(90deg);
+    }
+
+    .gfw-machines {
+      display: none;
+    }
+
+    .gfw-machines.expanded {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -539,6 +595,19 @@
           console.warn('Service worker registration failed:', err);
         });
       }
+
+      // Adjust login overlay when mobile keyboard opens/closes
+      if (window.visualViewport) {
+        function adjustLoginForKeyboard() {
+          const overlay = document.getElementById('loginOverlay');
+          if (!overlay || overlay.classList.contains('hidden')) return;
+          const vv = window.visualViewport;
+          overlay.style.height = vv.height + 'px';
+          overlay.style.top = vv.offsetTop + 'px';
+        }
+        window.visualViewport.addEventListener('resize', adjustLoginForKeyboard);
+        window.visualViewport.addEventListener('scroll', adjustLoginForKeyboard);
+      }
     });
 
     // =========== IP & Machine logic ===========
@@ -595,6 +664,18 @@
         return;
       }
 
+      // Separate machines into normal and GFW-tagged groups
+      const normalMachines = [];
+      const gfwMachines = [];
+      machines.forEach((m, i) => {
+        const hasGfwTag = (m.tags || []).some(t => t.key === 'app' && t.value === 'gfw');
+        if (hasGfwTag) {
+          gfwMachines.push({ machine: m, index: i });
+        } else {
+          normalMachines.push({ machine: m, index: i });
+        }
+      });
+
       let html = '';
       html += '<div class="select-all">';
       html += '<input type="checkbox" id="selectAll" onchange="toggleSelectAll()" />';
@@ -602,23 +683,52 @@
       html += '</div>';
       html += '<ul class="machine-list">';
 
-      machines.forEach((m, i) => {
-        const badgeClass = m.product === 'ecs' ? 'badge-ecs' : 'badge-swas';
-        const productLabel = m.product === 'ecs' ? 'ECS' : '轻量服务器';
-        const ips = (m.publicIpAddress || []).join(', ') || '无公网 IP';
-        html += '<li class="machine-item">';
-        html += '<input type="checkbox" class="machine-checkbox" data-index="' + i + '" onchange="updateSubmitBtn()" />';
-        html += '<div class="machine-info">';
-        html += '<div class="machine-name">' + escapeHtml(m.instanceName) + '</div>';
-        html += '<div class="machine-meta">' + escapeHtml(m.regionId) + ' · ' + escapeHtml(ips) + '</div>';
-        html += '<div class="machine-meta">' + escapeHtml(m.instanceId) + '</div>';
-        html += '</div>';
-        html += '<span class="machine-badge ' + badgeClass + '">' + productLabel + '</span>';
-        html += '</li>';
+      // Render normal machines
+      normalMachines.forEach(({ machine: m, index: i }) => {
+        html += renderMachineItem(m, i);
       });
 
       html += '</ul>';
+
+      // Render collapsible GFW section
+      if (gfwMachines.length > 0) {
+        html += '<div class="gfw-section">';
+        html += '<div class="gfw-toggle" onclick="toggleGfwSection()">';
+        html += '<span class="arrow" id="gfwArrow">▶</span>';
+        html += ' GFW 机器 (' + gfwMachines.length + ' 台)';
+        html += '</div>';
+        html += '<ul class="machine-list gfw-machines" id="gfwMachines">';
+        gfwMachines.forEach(({ machine: m, index: i }) => {
+          html += renderMachineItem(m, i);
+        });
+        html += '</ul>';
+        html += '</div>';
+      }
+
       container.innerHTML = html;
+    }
+
+    function renderMachineItem(m, i) {
+      const badgeClass = m.product === 'ecs' ? 'badge-ecs' : 'badge-swas';
+      const productLabel = m.product === 'ecs' ? 'ECS' : '轻量服务器';
+      const ips = (m.publicIpAddress || []).join(', ') || '无公网 IP';
+      let html = '<li class="machine-item">';
+      html += '<input type="checkbox" class="machine-checkbox" data-index="' + i + '" onchange="updateSubmitBtn()" />';
+      html += '<div class="machine-info">';
+      html += '<div class="machine-name">' + escapeHtml(m.instanceName) + '</div>';
+      html += '<div class="machine-meta">' + escapeHtml(m.regionId) + ' · ' + escapeHtml(ips) + '</div>';
+      html += '<div class="machine-meta">' + escapeHtml(m.instanceId) + '</div>';
+      html += '</div>';
+      html += '<span class="machine-badge ' + badgeClass + '">' + productLabel + '</span>';
+      html += '</li>';
+      return html;
+    }
+
+    function toggleGfwSection() {
+      const container = document.getElementById('gfwMachines');
+      const arrow = document.getElementById('gfwArrow');
+      if (container) container.classList.toggle('expanded');
+      if (arrow) arrow.classList.toggle('expanded');
     }
 
     function toggleSelectAll() {
