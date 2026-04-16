@@ -74,8 +74,16 @@
 
     .ip-display {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 12px;
+    }
+
+    .ip-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
     }
 
     .ip-value {
@@ -83,18 +91,26 @@
       font-weight: 700;
       font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
       color: #333;
-      flex: 1;
+      line-height: 1.2;
     }
 
     .ip-loading {
       color: #999;
       font-size: 16px;
+      line-height: 1.4;
     }
 
     .ip-location {
       font-size: 12px;
       color: #999;
-      margin-left: 4px;
+      line-height: 1.4;
+      min-height: 17px;
+      word-break: break-word;
+    }
+
+    .ip-refresh-btn {
+      flex-shrink: 0;
+      align-self: flex-start;
     }
 
     .btn {
@@ -455,8 +471,11 @@
     <div class="card">
       <div class="card-title">当前公网 IP</div>
       <div class="ip-display">
-        <span id="currentIp" class="ip-loading">获取中...</span><span id="ipLocation" class="ip-location"></span>
-        <button class="btn btn-small btn-primary" onclick="refreshIp()">刷新</button>
+        <div class="ip-info">
+          <span id="currentIp" class="ip-loading">获取中...</span>
+          <span id="ipLocation" class="ip-location"></span>
+        </div>
+        <button class="btn btn-small btn-primary ip-refresh-btn" onclick="refreshIp()">刷新</button>
       </div>
       <div class="ip-input-group">
         <input type="text" id="customIp" placeholder="输入指定 IP（留空使用当前 IP）" />
