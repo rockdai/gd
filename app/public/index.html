@@ -647,16 +647,19 @@
         el.className = 'ip-value';
         el.textContent = currentIp;
 
-        // Best-effort: fetch IP geolocation, ignore any errors
+        // Best-effort: resolve IP geolocation through our backend so the AMap key stays server-side.
         const fetchedIp = currentIp;
-        fetch('https://ip.im/' + encodeURIComponent(fetchedIp), { headers: { accept: 'application/json' } })
-          .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        authFetch('/api/ip-location?ip=' + encodeURIComponent(fetchedIp))
+          .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
           .then(function (data) {
             if (currentIp !== fetchedIp) return; // stale response
-            const parts = [data.country, data.province, data.city, data.isp].filter(Boolean);
-            if (parts.length) locEl.textContent = parts.join(' ');
+            if (data.success && data.location) locEl.textContent = data.location;
           })
-          .catch(function () {});
+          .catch(function (err) {
+            if (err && err.message !== 'AUTH_REQUIRED') {
+              console.warn('Failed to fetch IP geolocation:', err);
+            }
+          });
       } catch (err) {
         el.textContent = '获取失败';
         showToast('无法获取公网 IP: ' + err.message, 'error');

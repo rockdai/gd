@@ -14,5 +14,6 @@ module.exports = app => {
 
   // Protected API routes (JWT required – enforced by jwtAuth middleware)
   router.get('/api/machines', controller.api.machines);
+  router.get('/api/ip-location', controller.api.ipLocation);
   router.post('/api/whitelist', controller.api.addWhitelist);
 };

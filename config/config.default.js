@@ -63,5 +63,13 @@ module.exports = appInfo => {
     ],
   };
 
+  // AMap Web Service API key for server-side IP geolocation lookup.
+  // Keep this in the backend environment so it never reaches the browser.
+  config.amap = {
+    webServiceKey: process.env.AMAP_WEB_SERVICE_KEY || '',
+    ipLocationEndpoint: 'https://restapi.amap.com/v3/ip',
+    requestTimeout: 5000,
+  };
+
   return config;
 };
