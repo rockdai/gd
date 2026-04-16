@@ -19,7 +19,11 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       background: #f0f2f5;
       color: #333;
-      min-height: 100vh;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
 
     .header {
@@ -28,6 +32,7 @@
       padding: 20px;
       text-align: center;
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      flex-shrink: 0;
     }
 
     .header h1 {
@@ -45,6 +50,16 @@
       max-width: 640px;
       margin: 0 auto;
       padding: 16px;
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+      width: 100%;
+    }
+
+    .container::-webkit-scrollbar {
+      display: none;
     }
 
     .card {
@@ -305,6 +320,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      overflow: auto;
     }
 
     .login-overlay.hidden { display: none; }
@@ -372,6 +388,46 @@
     .btn-logout:hover { background: rgba(255,255,255,0.35); }
 
     .header { position: relative; }
+
+    /* Collapsible section for tagged machines */
+    .collapsed-section {
+      border-top: 1px dashed #d9d9d9;
+      margin-top: 8px;
+      padding-top: 4px;
+    }
+
+    .collapsed-toggle {
+      display: flex;
+      align-items: center;
+      padding: 8px 0;
+      cursor: pointer;
+      font-size: 13px;
+      color: #999;
+      user-select: none;
+      gap: 4px;
+    }
+
+    .collapsed-toggle:active {
+      opacity: 0.7;
+    }
+
+    .collapsed-toggle .arrow {
+      display: inline-block;
+      transition: transform 0.2s;
+      font-size: 10px;
+    }
+
+    .collapsed-toggle .arrow.expanded {
+      transform: rotate(90deg);
+    }
+
+    .collapsed-machines {
+      display: none;
+    }
+
+    .collapsed-machines.expanded {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -441,6 +497,7 @@
     let currentIp = '';
     let machines = [];
     let authToken = localStorage.getItem('gd_token') || '';
+    let loginViewportHandler = null;
 
     // =========== Auth helpers ===========
 
@@ -462,15 +519,43 @@
       return resp;
     }
 
+    function setupLoginViewportListeners() {
+      if (!window.visualViewport || loginViewportHandler) return;
+      loginViewportHandler = () => {
+        const overlay = document.getElementById('loginOverlay');
+        if (!overlay || overlay.classList.contains('hidden')) return;
+        const vv = window.visualViewport;
+        overlay.style.height = vv.height + 'px';
+        overlay.style.top = vv.offsetTop + 'px';
+      };
+      window.visualViewport.addEventListener('resize', loginViewportHandler);
+      window.visualViewport.addEventListener('scroll', loginViewportHandler);
+      loginViewportHandler();
+    }
+
+    function removeLoginViewportListeners() {
+      if (!window.visualViewport || !loginViewportHandler) return;
+      window.visualViewport.removeEventListener('resize', loginViewportHandler);
+      window.visualViewport.removeEventListener('scroll', loginViewportHandler);
+      loginViewportHandler = null;
+      const overlay = document.getElementById('loginOverlay');
+      if (overlay) {
+        overlay.style.height = '';
+        overlay.style.top = '';
+      }
+    }
+
     function showLoginOverlay() {
       document.getElementById('loginOverlay').classList.remove('hidden');
       document.getElementById('logoutBtn').style.display = 'none';
+      setupLoginViewportListeners();
       document.getElementById('loginPassword').focus();
     }
 
     function hideLoginOverlay() {
       document.getElementById('loginOverlay').classList.add('hidden');
       document.getElementById('logoutBtn').style.display = 'block';
+      removeLoginViewportListeners();
     }
 
     async function handleLogin(e) {
@@ -595,37 +680,121 @@
         return;
       }
 
+      const normalMachines = [];
+      const taggedMachines = [];
+      machines.forEach((m, i) => {
+        const isCollapsed = (m.tags || []).some(t => t.key === 'app' && t.value === 'gfw');
+        if (isCollapsed) {
+          taggedMachines.push({ machine: m, index: i });
+        } else {
+          normalMachines.push({ machine: m, index: i });
+        }
+      });
+
       let html = '';
       html += '<div class="select-all">';
       html += '<input type="checkbox" id="selectAll" onchange="toggleSelectAll()" />';
-      html += '<label for="selectAll">全选 (' + machines.length + ' 台机器)</label>';
+      const visibleCount = normalMachines.length;
+      const totalCount = machines.length;
+      const countLabel = taggedMachines.length > 0
+        ? visibleCount + ' / ' + totalCount + ' 台机器'
+        : totalCount + ' 台机器';
+      html += '<label for="selectAll">全选 (' + countLabel + ')</label>';
       html += '</div>';
       html += '<ul class="machine-list">';
 
-      machines.forEach((m, i) => {
-        const badgeClass = m.product === 'ecs' ? 'badge-ecs' : 'badge-swas';
-        const productLabel = m.product === 'ecs' ? 'ECS' : '轻量服务器';
-        const ips = (m.publicIpAddress || []).join(', ') || '无公网 IP';
-        html += '<li class="machine-item">';
-        html += '<input type="checkbox" class="machine-checkbox" data-index="' + i + '" onchange="updateSubmitBtn()" />';
-        html += '<div class="machine-info">';
-        html += '<div class="machine-name">' + escapeHtml(m.instanceName) + '</div>';
-        html += '<div class="machine-meta">' + escapeHtml(m.regionId) + ' · ' + escapeHtml(ips) + '</div>';
-        html += '<div class="machine-meta">' + escapeHtml(m.instanceId) + '</div>';
-        html += '</div>';
-        html += '<span class="machine-badge ' + badgeClass + '">' + productLabel + '</span>';
-        html += '</li>';
+      normalMachines.forEach(({ machine: m, index: i }) => {
+        html += renderMachineItem(m, i);
       });
 
       html += '</ul>';
+
+      if (taggedMachines.length > 0) {
+        html += '<div class="collapsed-section">';
+        html += '<div class="collapsed-toggle" id="collapsedToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="collapsedMachines" onclick="toggleCollapsedSection()" onkeydown="handleCollapsedToggleKey(event)">';
+        html += '<span class="arrow" id="collapsedArrow">▶</span>';
+        html += ' 更多机器 (' + taggedMachines.length + ' 台)';
+        html += '</div>';
+        html += '<ul class="machine-list collapsed-machines" id="collapsedMachines">';
+        taggedMachines.forEach(({ machine: m, index: i }) => {
+          html += renderMachineItem(m, i);
+        });
+        html += '</ul>';
+        html += '</div>';
+      }
+
       container.innerHTML = html;
+      updateSelectAllState();
+    }
+
+    function renderMachineItem(m, i) {
+      const badgeClass = m.product === 'ecs' ? 'badge-ecs' : 'badge-swas';
+      const productLabel = m.product === 'ecs' ? 'ECS' : '轻量服务器';
+      const ips = (m.publicIpAddress || []).join(', ') || '无公网 IP';
+      let html = '<li class="machine-item">';
+      html += '<input type="checkbox" class="machine-checkbox" data-index="' + i + '" onchange="handleMachineCheckboxChange()" />';
+      html += '<div class="machine-info">';
+      html += '<div class="machine-name">' + escapeHtml(m.instanceName) + '</div>';
+      html += '<div class="machine-meta">' + escapeHtml(m.regionId) + ' · ' + escapeHtml(ips) + '</div>';
+      html += '<div class="machine-meta">' + escapeHtml(m.instanceId) + '</div>';
+      html += '</div>';
+      html += '<span class="machine-badge ' + badgeClass + '">' + productLabel + '</span>';
+      html += '</li>';
+      return html;
+    }
+
+    function toggleCollapsedSection() {
+      const container = document.getElementById('collapsedMachines');
+      const arrow = document.getElementById('collapsedArrow');
+      const toggle = document.getElementById('collapsedToggle');
+      if (!container) return;
+      const expanded = container.classList.toggle('expanded');
+      if (arrow) arrow.classList.toggle('expanded', expanded);
+      if (toggle) toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      updateSelectAllState();
+    }
+
+    function handleCollapsedToggleKey(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleCollapsedSection();
+      }
+    }
+
+    function getVisibleCheckboxes() {
+      const collapsedContainer = document.getElementById('collapsedMachines');
+      const collapsedHidden = collapsedContainer && !collapsedContainer.classList.contains('expanded');
+      return Array.from(document.querySelectorAll('.machine-checkbox')).filter(cb => {
+        return !(collapsedHidden && collapsedContainer.contains(cb));
+      });
     }
 
     function toggleSelectAll() {
-      const checked = document.getElementById('selectAll').checked;
-      document.querySelectorAll('.machine-checkbox').forEach(cb => {
+      const selectAll = document.getElementById('selectAll');
+      const checked = selectAll ? selectAll.checked : false;
+      getVisibleCheckboxes().forEach(cb => {
         cb.checked = checked;
       });
+      updateSelectAllState();
+      updateSubmitBtn();
+    }
+
+    function updateSelectAllState() {
+      const selectAll = document.getElementById('selectAll');
+      if (!selectAll) return;
+      const visibleCheckboxes = getVisibleCheckboxes();
+      if (visibleCheckboxes.length === 0) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+        return;
+      }
+      const checkedCount = visibleCheckboxes.filter(cb => cb.checked).length;
+      selectAll.checked = checkedCount === visibleCheckboxes.length;
+      selectAll.indeterminate = checkedCount > 0 && checkedCount < visibleCheckboxes.length;
+    }
+
+    function handleMachineCheckboxChange() {
+      updateSelectAllState();
       updateSubmitBtn();
     }
 
