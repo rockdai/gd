@@ -1,13 +1,7 @@
 'use strict';
 
 const { Controller } = require('egg');
-
-function isValidIpv4(ip) {
-  if (typeof ip !== 'string') return false;
-  const parts = ip.split('.');
-  if (parts.length !== 4) return false;
-  return parts.every(part => /^\d+$/.test(part) && Number(part) >= 0 && Number(part) <= 255);
-}
+const { isValidIpv4 } = require('../../lib/ip');
 
 class ApiController extends Controller {
   /**
@@ -50,9 +44,11 @@ class ApiController extends Controller {
       const result = await ctx.service.ipLocation.lookup(ip);
       ctx.body = { success: true, ...result };
     } catch (err) {
-      ctx.logger.error('[api/ip-location] Failed to resolve ip location:', err);
-      ctx.status = err.message.includes('Missing AMap Web Service key') ? 500 : 502;
-      ctx.body = { success: false, message: err.message };
+      const status = err.status || 502;
+      const message = err.publicMessage || 'IP geolocation lookup failed';
+      ctx.logger.error('[api/ip-location] Failed to resolve ip location: code=%s status=%s message=%s', err.code || 'UNKNOWN', status, err.message);
+      ctx.status = status;
+      ctx.body = { success: false, message };
     }
   }
 
