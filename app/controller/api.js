@@ -1,6 +1,7 @@
 'use strict';
 
 const { Controller } = require('egg');
+const { isValidIpv4 } = require('../../lib/ip');
 
 class ApiController extends Controller {
   /**
@@ -20,6 +21,38 @@ class ApiController extends Controller {
   }
 
   /**
+   * GET /api/ip-location?ip=1.2.3.4
+   * Resolve an IPv4 address to province/city through the server-side AMap API.
+   */
+  async ipLocation() {
+    const { ctx } = this;
+    const ip = String(ctx.query.ip || '').trim();
+
+    if (!ip) {
+      ctx.status = 400;
+      ctx.body = { success: false, message: 'ip is required' };
+      return;
+    }
+
+    if (!isValidIpv4(ip)) {
+      ctx.status = 400;
+      ctx.body = { success: false, message: 'Invalid IPv4 address' };
+      return;
+    }
+
+    try {
+      const result = await ctx.service.ipLocation.lookup(ip);
+      ctx.body = { success: true, ...result };
+    } catch (err) {
+      const status = err.status || 502;
+      const message = err.publicMessage || 'IP geolocation lookup failed';
+      ctx.logger.error('[api/ip-location] Failed to resolve ip location: code=%s status=%s message=%s', err.code || 'UNKNOWN', status, err.message);
+      ctx.status = status;
+      ctx.body = { success: false, message };
+    }
+  }
+
+  /**
    * POST /api/whitelist
    * Add an IP to selected machines' whitelist
    * Body: { ip: string, machines: Array<{ product, instanceId, regionId, securityGroupId? }> }
@@ -35,8 +68,7 @@ class ApiController extends Controller {
     }
 
     // Basic IPv4 validation
-    const ipv4Regex = /^\d{1,3}(\.\d{1,3}){3}$/;
-    if (!ipv4Regex.test(ip)) {
+    if (!isValidIpv4(ip)) {
       ctx.status = 400;
       ctx.body = { success: false, message: 'Invalid IPv4 address' };
       return;
