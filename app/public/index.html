@@ -683,8 +683,8 @@
       const normalMachines = [];
       const taggedMachines = [];
       machines.forEach((m, i) => {
-        const hasGfwTag = (m.tags || []).some(t => t.key === 'app' && t.value === 'gfw');
-        if (hasGfwTag) {
+        const isCollapsed = (m.tags || []).some(t => t.key === 'app' && t.value === 'gfw');
+        if (isCollapsed) {
           taggedMachines.push({ machine: m, index: i });
         } else {
           normalMachines.push({ machine: m, index: i });
@@ -694,7 +694,12 @@
       let html = '';
       html += '<div class="select-all">';
       html += '<input type="checkbox" id="selectAll" onchange="toggleSelectAll()" />';
-      html += '<label for="selectAll">全选 (' + machines.length + ' 台机器)</label>';
+      const visibleCount = normalMachines.length;
+      const totalCount = machines.length;
+      const countLabel = taggedMachines.length > 0
+        ? visibleCount + ' / ' + totalCount + ' 台机器'
+        : totalCount + ' 台机器';
+      html += '<label for="selectAll">全选 (' + countLabel + ')</label>';
       html += '</div>';
       html += '<ul class="machine-list">';
 
@@ -760,7 +765,7 @@
       const collapsedContainer = document.getElementById('collapsedMachines');
       const collapsedHidden = collapsedContainer && !collapsedContainer.classList.contains('expanded');
       return Array.from(document.querySelectorAll('.machine-checkbox')).filter(cb => {
-        return !(collapsedHidden && collapsedContainer && collapsedContainer.contains(cb));
+        return !(collapsedHidden && collapsedContainer.contains(cb));
       });
     }
 
