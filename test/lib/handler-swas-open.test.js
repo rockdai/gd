@@ -78,6 +78,35 @@ describe('swas CLI rule ownership', () => {
     assert.strictEqual(client.modifyCalls[0].sourceCidrIp, '1.2.3.4/32');
   });
 
+  it('updates legacy CLI-managed rules and migrates them to the new prefix', async () => {
+    const client = createClient();
+
+    const result = await ensureSwasRuleForProtocol({
+      client,
+      conf: {
+        instanceId: 'i-test',
+        regionId: 'cn-hangzhou',
+      },
+      rules: [ {
+        ruleId: 'legacy-managed-rule',
+        ruleProtocol: 'TCP',
+        port: PORT_RANGE,
+        remark: 'ecs-dsec-handler@2026-04-17 10:00:00',
+        sourceCidrIp: '2.2.2.2/32',
+      } ],
+      ip: '1.2.3.4',
+      remark: 'ecs-dsec-handler',
+      dryRun: false,
+      protocol: 'TCP',
+    });
+
+    assert.strictEqual(result.action, 'modified');
+    assert.strictEqual(client.createCalls.length, 0);
+    assert.strictEqual(client.modifyCalls.length, 1);
+    assert.match(client.modifyCalls[0].remark, /^gd-cli:ecs-dsec-handler@/);
+    assert.strictEqual(client.modifyCalls[0].sourceCidrIp, '1.2.3.4/32');
+  });
+
   it('avoids duplicate creation when a manual rule already allows the target ip', async () => {
     const client = createClient();
 

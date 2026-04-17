@@ -11,6 +11,7 @@ const {
   buildManagedDdnsRemark,
   isManagedDdnsRemark,
   buildManagedCliRemark,
+  isLegacyManagedCliRemark,
   isManagedCliRemark,
   isRuleExpired,
   isExpiredWebRule,
@@ -39,7 +40,9 @@ describe('firewall-rule helpers', () => {
     assert.strictEqual(isManagedDdnsRemark(ddnsRemark, 'xfyj.keydiary.dev'), true);
     assert.strictEqual(isManagedDdnsRemark('xfyj.keydiary.dev@2026-04-17 12:00:00', 'xfyj.keydiary.dev'), true);
     assert.strictEqual(isManagedDdnsRemark('云谷园区', 'xfyj.keydiary.dev'), false);
+    assert.strictEqual(isLegacyManagedCliRemark('ecs-dsec-handler@2026-04-17 12:00:00', 'ecs-dsec-handler'), true);
     assert.strictEqual(isManagedCliRemark(cliRemark, 'ecs-dsec-handler'), true);
+    assert.strictEqual(isManagedCliRemark('ecs-dsec-handler@2026-04-17 12:00:00', 'ecs-dsec-handler'), true);
     assert.strictEqual(isManagedCliRemark('ecs-dsec-handler', 'ecs-dsec-handler'), false);
   });
 
