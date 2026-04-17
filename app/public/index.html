@@ -609,7 +609,7 @@
         if (!overlay || overlay.classList.contains('hidden')) return;
         const vv = window.visualViewport;
         overlay.style.height = vv.height + 'px';
-        overlay.style.top = '0px';
+        overlay.style.top = vv.offsetTop + 'px';
       };
       window.visualViewport.addEventListener('resize', loginViewportHandler);
       window.visualViewport.addEventListener('scroll', loginViewportHandler);
