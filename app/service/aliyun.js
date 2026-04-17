@@ -146,14 +146,14 @@ class AliyunService extends Service {
     for (const machine of machines) {
       try {
         if (machine.product === 'ecs') {
-          const cleanup = await this._cleanupExpiredWebRules(credential, machine);
+          const cleanup = await this._tryCleanupExpiredWebRules(credential, machine);
           const result = await this._addIpToEcs(credential, machine, sourceCidrIp, description);
-          result.message = this._appendCleanupMessage(result.message, cleanup.deletedCount);
+          result.message = this._appendCleanupMessage(result.message, cleanup);
           results.push({ ...machine, ...result });
         } else if (machine.product === 'swas-open') {
-          const cleanup = await this._cleanupExpiredWebRules(credential, machine);
+          const cleanup = await this._tryCleanupExpiredWebRules(credential, machine);
           const result = await this._addIpToSwas(credential, machine, sourceCidrIp, description);
-          result.message = this._appendCleanupMessage(result.message, cleanup.deletedCount);
+          result.message = this._appendCleanupMessage(result.message, cleanup);
           results.push({ ...machine, ...result });
         } else {
           results.push({ ...machine, status: 'skipped', message: `Unsupported product: ${machine.product}` });
@@ -330,6 +330,18 @@ class AliyunService extends Service {
     return { deletedCount: staleRuleIds.length };
   }
 
+  async _tryCleanupExpiredWebRules(credential, machine) {
+    try {
+      return await this._cleanupExpiredWebRules(credential, machine);
+    } catch (err) {
+      this.logger.warn(`[aliyun] Failed to cleanup expired web rules for ${machine.product}/${machine.instanceId}:`, err);
+      return {
+        deletedCount: 0,
+        failed: true,
+      };
+    }
+  }
+
   _isExpiredWebRule({ protocol, port, remark }) {
     return (
       RULE_PROTOCOLS.includes(normalizeProtocol(protocol)) &&
@@ -339,9 +351,15 @@ class AliyunService extends Service {
     );
   }
 
-  _appendCleanupMessage(message, deletedCount) {
-    if (!deletedCount) return message;
-    return `${message}; cleaned ${deletedCount} expired ${GD_WEB_RULE_PREFIX} rule(s)`;
+  _appendCleanupMessage(message, cleanup = {}) {
+    const messageParts = [ message ];
+    if (cleanup.deletedCount) {
+      messageParts.push(`cleaned ${cleanup.deletedCount} expired ${GD_WEB_RULE_PREFIX} rule(s)`);
+    }
+    if (cleanup.failed) {
+      messageParts.push('cleanup failed');
+    }
+    return messageParts.join('; ');
   }
 }
 
