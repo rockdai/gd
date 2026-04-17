@@ -22,6 +22,8 @@
 
 `ecs-dsec-handler`：获取当前设备公网 IP，为每台实例创建/维护防火墙规则。
 
+定时任务和 CLI 只会修改带系统托管 remark 的规则，不会认领或覆盖普通手工规则。
+
 ## 快速开始
 
 ### 凭证配置
@@ -167,6 +169,7 @@ s deploy --type code
 
 - `DOMAIN`：需要解析的 DDNS 域名列表
 - `RuleConfig`：需要更新的规则列表
+- `RuleConfig[].ruleList[].id` / `ids`：仅用于定位已由本工具创建并托管的规则，不能填写手工维护规则的 ID
 
 ## 开发/协作约定
 

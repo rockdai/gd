@@ -15,10 +15,11 @@ const {
   PORT_RANGE,
   RULE_PROTOCOLS,
   toSourceCidrIp,
-  normalizeProtocol,
   formatDateTime,
   getRuleField,
-  hasRemarkPrefix,
+  buildManagedDdnsRemark,
+  isManagedDdnsRemark,
+  findManagedRule,
 } = require('./lib/firewall-rule');
 const { listAllFirewallRules } = require('./lib/swas-firewall');
 
@@ -86,7 +87,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
 
   for (const ruleConf of conf.ruleList) {
     const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
-    const description = `${ruleConf.name}@${current}`;
+    const description = buildManagedDdnsRemark(ruleConf.name, current);
 
     for (const protocol of RULE_PROTOCOLS) {
       const targetRule = findManagedRule({
@@ -97,6 +98,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
         protocolField: 'ipProtocol',
         remarkField: 'description',
         portField: 'portRange',
+        remarkMatcher: value => isManagedDdnsRemark(value, ruleConf.name),
       });
 
       if (targetRule) {
@@ -182,7 +184,7 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
 
   for (const ruleConf of conf.ruleList) {
     const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
-    const remark = `${ruleConf.name}@${current}`;
+    const remark = buildManagedDdnsRemark(ruleConf.name, current);
 
     for (const protocol of RULE_PROTOCOLS) {
       const targetRule = findManagedRule({
@@ -193,6 +195,7 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
         protocolField: 'ruleProtocol',
         remarkField: 'remark',
         portField: 'port',
+        remarkMatcher: value => isManagedDdnsRemark(value, ruleConf.name),
       });
 
       if (targetRule) {
@@ -284,39 +287,6 @@ async function listSwasRules(client, conf) {
     instanceId: conf.instanceId,
     regionId: conf.regionId,
   });
-}
-
-function findManagedRule({ rules, ruleConf, protocol, idField, protocolField, remarkField, portField }) {
-  const configuredIds = getConfiguredRuleIds(ruleConf);
-  const configuredId = configuredIds[protocol];
-  if (configuredId) {
-    const exactRule = rules.find(rule => getRuleField(rule, idField) === configuredId);
-    if (exactRule) return exactRule;
-  }
-
-  const matchedByRemark = rules.find(rule => (
-    normalizeProtocol(getRuleField(rule, protocolField)) === protocol &&
-    getRuleField(rule, portField) === PORT_RANGE &&
-    hasRemarkPrefix(getRuleField(rule, remarkField) || '', ruleConf.name)
-  ));
-  if (matchedByRemark) return matchedByRemark;
-
-  if (!configuredIds.default) return null;
-  const defaultRule = rules.find(rule => getRuleField(rule, idField) === configuredIds.default);
-  if (!defaultRule) return null;
-  return normalizeProtocol(getRuleField(defaultRule, protocolField)) === protocol ? defaultRule : null;
-}
-
-function getConfiguredRuleIds(ruleConf) {
-  const configuredIds = {};
-  if (ruleConf.ids && typeof ruleConf.ids === 'object') {
-    for (const protocol of RULE_PROTOCOLS) {
-      const configuredId = ruleConf.ids[protocol];
-      if (configuredId) configuredIds[protocol] = configuredId;
-    }
-  }
-  if (ruleConf.id) configuredIds.default = ruleConf.id;
-  return configuredIds;
 }
 
 function buildRuleError({ conf, ruleName, protocol, phase, message }) {
