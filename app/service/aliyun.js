@@ -11,7 +11,6 @@ const {
 const {
   default: SWASClient,
   ListInstancesRequest,
-  ListFirewallRulesRequest,
   CreateFirewallRulesRequest,
   DeleteFirewallRulesRequest,
 } = require('@alicloud/swas-open20200601');
@@ -21,13 +20,11 @@ const {
   RULE_PROTOCOLS,
   GD_WEB_RULE_PREFIX,
   toSourceCidrIp,
-  normalizeProtocol,
   formatDateTime,
-  pickFirewallRules,
   getRuleField,
-  hasRemarkPrefix,
-  isRuleExpired,
+  isExpiredWebRule,
 } = require('../../lib/firewall-rule');
+const { listAllFirewallRules } = require('../../lib/swas-firewall');
 
 class AliyunService extends Service {
 
@@ -181,6 +178,8 @@ class AliyunService extends Service {
       ...credential,
     });
     const protocolResults = [];
+    let hasSuccess = false;
+    let hasFailure = false;
 
     for (const protocol of RULE_PROTOCOLS) {
       const req = new AuthorizeSecurityGroupRequest({
@@ -195,16 +194,19 @@ class AliyunService extends Service {
       try {
         await client.authorizeSecurityGroup(req);
         protocolResults.push(`${protocol}: added`);
+        hasSuccess = true;
       } catch (err) {
         if (err.message && err.message.includes('AuthorizationAlreadyExist')) {
           protocolResults.push(`${protocol}: already exists`);
+          hasSuccess = true;
           continue;
         }
-        throw new Error(`${protocol} rule failed: ${err.message}`);
+        protocolResults.push(`${protocol}: failed (${err.message})`);
+        hasFailure = true;
       }
     }
 
-    return { status: 'success', message: protocolResults.join(', ') };
+    return this._buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure });
   }
 
   /**
@@ -219,6 +221,8 @@ class AliyunService extends Service {
       ...credential,
     });
     const protocolResults = [];
+    let hasSuccess = false;
+    let hasFailure = false;
 
     for (const protocol of RULE_PROTOCOLS) {
       const req = new CreateFirewallRulesRequest({
@@ -235,16 +239,19 @@ class AliyunService extends Service {
       try {
         await client.createFirewallRules(req);
         protocolResults.push(`${protocol}: added`);
+        hasSuccess = true;
       } catch (err) {
         if (err.message && err.message.includes('FirewallRuleAlreadyExist')) {
           protocolResults.push(`${protocol}: already exists`);
+          hasSuccess = true;
           continue;
         }
-        throw new Error(`${protocol} rule failed: ${err.message}`);
+        protocolResults.push(`${protocol}: failed (${err.message})`);
+        hasFailure = true;
       }
     }
 
-    return { status: 'success', message: protocolResults.join(', ') };
+    return this._buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure });
   }
 
   async _cleanupExpiredWebRules(credential, machine) {
@@ -275,7 +282,7 @@ class AliyunService extends Service {
     const listResp = await client.describeSecurityGroupAttribute(listReq);
     const rules = listResp?.body?.permissions?.permission || [];
     const staleRuleIds = rules
-      .filter(rule => this._isExpiredWebRule({
+      .filter(rule => isExpiredWebRule({
         protocol: rule.ipProtocol,
         port: rule.portRange,
         remark: rule.description,
@@ -302,16 +309,13 @@ class AliyunService extends Service {
       ...credential,
     });
 
-    const listReq = new ListFirewallRulesRequest({
+    const rules = await listAllFirewallRules({
+      client,
       instanceId,
       regionId,
-      pageNumber: 1,
-      pageSize: 100,
     });
-    const listResp = await client.listFirewallRules(listReq);
-    const rules = pickFirewallRules(listResp.body);
     const staleRuleIds = rules
-      .filter(rule => this._isExpiredWebRule({
+      .filter(rule => isExpiredWebRule({
         protocol: getRuleField(rule, 'ruleProtocol'),
         port: getRuleField(rule, 'port'),
         remark: getRuleField(rule, 'remark'),
@@ -342,13 +346,18 @@ class AliyunService extends Service {
     }
   }
 
-  _isExpiredWebRule({ protocol, port, remark }) {
-    return (
-      RULE_PROTOCOLS.includes(normalizeProtocol(protocol)) &&
-      port === PORT_RANGE &&
-      hasRemarkPrefix(remark, GD_WEB_RULE_PREFIX) &&
-      isRuleExpired(remark)
-    );
+  _buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure }) {
+    let status = 'success';
+    if (hasFailure && hasSuccess) {
+      status = 'partial';
+    } else if (hasFailure) {
+      status = 'error';
+    }
+
+    return {
+      status,
+      message: protocolResults.join(', '),
+    };
   }
 
   _appendCleanupMessage(message, cleanup = {}) {

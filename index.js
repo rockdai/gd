@@ -7,7 +7,6 @@ const {
 const {
   default: SWASClient,
   ModifyFirewallRuleRequest,
-  ListFirewallRulesRequest,
   CreateFirewallRulesRequest,
 } = require('@alicloud/swas-open20200601');
 
@@ -18,10 +17,10 @@ const {
   toSourceCidrIp,
   normalizeProtocol,
   formatDateTime,
-  pickFirewallRules,
   getRuleField,
   hasRemarkPrefix,
 } = require('./lib/firewall-rule');
+const { listAllFirewallRules } = require('./lib/swas-firewall');
 
 exports.handler = (evt, ctx, cb) => {
   (async () => {
@@ -42,18 +41,33 @@ exports.handler = (evt, ctx, cb) => {
       accessKeyId: process.env.ACCESS_KEY_ID,
       accessKeySecret: process.env.ACCESS_KEY_SECRET,
     };
+    const errors = [];
     // 逐条处理
     for (const CONF of RuleConfig) {
       console.log('----------------------------------------');
       console.log('Start to handle', CONF);
       const current = formatDateTime();
 
-      if (CONF.product === 'ecs') {
-        await handleEcsRuleConfig({ conf: CONF, ipMap, current, credential });
+      try {
+        if (CONF.product === 'ecs') {
+          errors.push(...await handleEcsRuleConfig({ conf: CONF, ipMap, current, credential }));
+        }
+        if (CONF.product === 'swas-open') {
+          errors.push(...await handleSwasRuleConfig({ conf: CONF, ipMap, current, credential }));
+        }
+      } catch (ex) {
+        errors.push(buildRuleError({
+          conf: CONF,
+          ruleName: '*',
+          protocol: '*',
+          phase: 'config',
+          message: ex.message,
+        }));
       }
-      if (CONF.product === 'swas-open') {
-        await handleSwasRuleConfig({ conf: CONF, ipMap, current, credential });
-      }
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`Failed to reconcile ${errors.length} rule operation(s):\n${errors.join('\n')}`);
     }
     return cb(null, true);
   })().catch(ex => {
@@ -68,6 +82,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
     ...credential,
   });
   const rules = await listEcsRules(client, conf);
+  const errors = [];
 
   for (const ruleConf of conf.ruleList) {
     const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
@@ -106,7 +121,14 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
             console.log(`Security group ${protocol} rule already exists, skip`);
             continue;
           }
-          throw ex;
+          errors.push(buildRuleError({
+            conf,
+            ruleName: ruleConf.name,
+            protocol,
+            phase: 'modify',
+            message: ex.message,
+          }));
+          continue;
         }
         continue;
       }
@@ -135,10 +157,18 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
           console.log(`Security group ${protocol} rule already exists, skip create`);
           continue;
         }
-        throw ex;
+        errors.push(buildRuleError({
+          conf,
+          ruleName: ruleConf.name,
+          protocol,
+          phase: 'create',
+          message: ex.message,
+        }));
       }
     }
   }
+
+  return errors;
 }
 
 async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
@@ -148,6 +178,7 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
     ...credential,
   });
   const rules = await listSwasRules(client, conf);
+  const errors = [];
 
   for (const ruleConf of conf.ruleList) {
     const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
@@ -184,7 +215,14 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
             console.log(`Firewall ${protocol} rule already exists, skip`);
             continue;
           }
-          throw ex;
+          errors.push(buildRuleError({
+            conf,
+            ruleName: ruleConf.name,
+            protocol,
+            phase: 'modify',
+            message: ex.message,
+          }));
+          continue;
         }
         continue;
       }
@@ -215,10 +253,18 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
           console.log(`Firewall ${protocol} rule already exists, skip create`);
           continue;
         }
-        throw ex;
+        errors.push(buildRuleError({
+          conf,
+          ruleName: ruleConf.name,
+          protocol,
+          phase: 'create',
+          message: ex.message,
+        }));
       }
     }
   }
+
+  return errors;
 }
 
 async function listEcsRules(client, conf) {
@@ -233,14 +279,11 @@ async function listEcsRules(client, conf) {
 }
 
 async function listSwasRules(client, conf) {
-  const req = new ListFirewallRulesRequest({
+  return await listAllFirewallRules({
+    client,
     instanceId: conf.instanceId,
     regionId: conf.regionId,
-    pageNumber: 1,
-    pageSize: 100,
   });
-  const resp = await client.listFirewallRules(req);
-  return pickFirewallRules(resp.body);
 }
 
 function findManagedRule({ rules, ruleConf, protocol, idField, protocolField, remarkField, portField }) {
@@ -274,6 +317,11 @@ function getConfiguredRuleIds(ruleConf) {
   }
   if (ruleConf.id) configuredIds.default = ruleConf.id;
   return configuredIds;
+}
+
+function buildRuleError({ conf, ruleName, protocol, phase, message }) {
+  const identity = conf.groupId || conf.instanceId || '*';
+  return `[${conf.product}/${conf.regionId}/${identity}] ${ruleName} ${protocol} ${phase} failed: ${message}`;
 }
 
 async function fetchDns(domain) {

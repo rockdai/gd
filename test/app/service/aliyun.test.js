@@ -38,4 +38,34 @@ describe('AliyunService cleanup handling', () => {
 
     assert.strictEqual(message, 'TCP: added, UDP: added; cleaned 2 expired gd-web rule(s); cleanup failed');
   });
+
+  it('marks protocol results as partial when only some protocols succeed', () => {
+    const result = AliyunService.prototype._buildProtocolOperationResult.call({}, [
+      'TCP: added',
+      'UDP: failed (boom)',
+    ], {
+      hasSuccess: true,
+      hasFailure: true,
+    });
+
+    assert.deepStrictEqual(result, {
+      status: 'partial',
+      message: 'TCP: added, UDP: failed (boom)',
+    });
+  });
+
+  it('marks protocol results as error when all protocols fail', () => {
+    const result = AliyunService.prototype._buildProtocolOperationResult.call({}, [
+      'TCP: failed (boom)',
+      'UDP: failed (boom)',
+    ], {
+      hasSuccess: false,
+      hasFailure: true,
+    });
+
+    assert.deepStrictEqual(result, {
+      status: 'error',
+      message: 'TCP: failed (boom), UDP: failed (boom)',
+    });
+  });
 });

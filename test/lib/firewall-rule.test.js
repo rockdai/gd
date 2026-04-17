@@ -4,10 +4,12 @@ const assert = require('assert');
 
 const {
   RULE_PROTOCOLS,
+  PORT_RANGE,
   toSourceCidrIp,
   normalizeIpForCompare,
   hasRemarkPrefix,
   isRuleExpired,
+  isExpiredWebRule,
   parseRuleTimestamp,
 } = require('../../lib/firewall-rule');
 
@@ -31,5 +33,34 @@ describe('firewall-rule helpers', () => {
     assert.strictEqual(isRuleExpired('gd-web@2026-04-17 12:00:00', 1000, timestamp + 1001), true);
     assert.strictEqual(isRuleExpired('gd-web@2026-04-17 12:00:00', 1000, timestamp + 999), false);
     assert.strictEqual(isRuleExpired('gd-web-without-time'), false);
+  });
+
+  it('rejects malformed timestamps instead of auto-normalizing them', () => {
+    assert.strictEqual(parseRuleTimestamp('gd-web@2026-99-17 12:00:00'), null);
+    assert.strictEqual(parseRuleTimestamp('gd-web@2026-02-31 12:00:00'), null);
+    assert.strictEqual(parseRuleTimestamp('gd-web@2026-04-17 25:00:00'), null);
+  });
+
+  it('only treats stale gd-web TCP/UDP full-port rules as expired web rules', () => {
+    const rules = [
+      { id: 'stale-tcp', protocol: 'TCP', port: PORT_RANGE, remark: 'gd-web@2026-04-15 12:00:00' },
+      { id: 'stale-udp', protocol: 'UDP', port: PORT_RANGE, remark: 'gd-web@2026-04-15 12:00:00' },
+      { id: 'fresh', protocol: 'TCP', port: PORT_RANGE, remark: 'gd-web@2026-04-17 11:59:59' },
+      { id: 'wrong-prefix', protocol: 'TCP', port: PORT_RANGE, remark: 'other@2026-04-15 12:00:00' },
+      { id: 'wrong-port', protocol: 'TCP', port: '22/22', remark: 'gd-web@2026-04-15 12:00:00' },
+      { id: 'wrong-protocol', protocol: 'ICMP', port: PORT_RANGE, remark: 'gd-web@2026-04-15 12:00:00' },
+      { id: 'invalid-time', protocol: 'TCP', port: PORT_RANGE, remark: 'gd-web@2026-99-15 12:00:00' },
+    ];
+
+    const expiredIds = rules
+      .filter(rule => isExpiredWebRule({
+        protocol: rule.protocol,
+        port: rule.port,
+        remark: rule.remark,
+        now: Date.parse('2026-04-17T12:00:01'),
+      }))
+      .map(rule => rule.id);
+
+    assert.deepStrictEqual(expiredIds, [ 'stale-tcp', 'stale-udp' ]);
   });
 });
