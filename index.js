@@ -100,7 +100,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
       });
 
       if (targetRule) {
-        const ruleId = targetRule.securityGroupRuleId;
+        const ruleId = getRuleField(targetRule, 'securityGroupRuleId');
         const rule = new ModifySecurityGroupRuleRequest({
           regionId: conf.regionId,
           securityGroupId: conf.groupId,

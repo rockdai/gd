@@ -283,11 +283,11 @@ class AliyunService extends Service {
     const rules = listResp?.body?.permissions?.permission || [];
     const staleRuleIds = rules
       .filter(rule => isExpiredWebRule({
-        protocol: rule.ipProtocol,
-        port: rule.portRange,
-        remark: rule.description,
+        protocol: getRuleField(rule, 'ipProtocol'),
+        port: getRuleField(rule, 'portRange'),
+        remark: getRuleField(rule, 'description'),
       }))
-      .map(rule => rule.securityGroupRuleId)
+      .map(rule => getRuleField(rule, 'securityGroupRuleId'))
       .filter(Boolean);
 
     if (staleRuleIds.length === 0) return { deletedCount: 0 };
