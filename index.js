@@ -305,3 +305,12 @@ async function fetchDns(domain) {
   const json = await response.json();
   return json.Answer[0].data;
 }
+
+exports.__private__ = {
+  handleEcsRuleConfig,
+  handleSwasRuleConfig,
+  listEcsRules,
+  listSwasRules,
+  buildRuleError,
+  fetchDns,
+};
