@@ -1,8 +1,27 @@
-const { default: ECSClient, ModifySecurityGroupRuleRequest } = require('@alicloud/ecs20140526');
-const { default: SWASClient, ModifyFirewallRuleRequest } = require('@alicloud/swas-open20200601');
+const {
+  default: ECSClient,
+  ModifySecurityGroupRuleRequest,
+  DescribeSecurityGroupAttributeRequest,
+  AuthorizeSecurityGroupRequest,
+} = require('@alicloud/ecs20140526');
+const {
+  default: SWASClient,
+  ModifyFirewallRuleRequest,
+  ListFirewallRulesRequest,
+  CreateFirewallRulesRequest,
+} = require('@alicloud/swas-open20200601');
 
-const PORT_RANGE = '1/65535';
 const { DOMAIN, RuleConfig } = require('./config');
+const {
+  PORT_RANGE,
+  RULE_PROTOCOLS,
+  toSourceCidrIp,
+  normalizeProtocol,
+  formatDateTime,
+  pickFirewallRules,
+  getRuleField,
+  hasRemarkPrefix,
+} = require('./lib/firewall-rule');
 
 exports.handler = (evt, ctx, cb) => {
   (async () => {
@@ -27,62 +46,13 @@ exports.handler = (evt, ctx, cb) => {
     for (const CONF of RuleConfig) {
       console.log('----------------------------------------');
       console.log('Start to handle', CONF);
-      const current = getDate();
+      const current = formatDateTime();
 
       if (CONF.product === 'ecs') {
-        const client = new ECSClient({
-          endpoint: `ecs.${CONF.regionId}.aliyuncs.com`,
-          ...credential,
-        });
-        for (const RULE of CONF.ruleList) {
-          const rule = new ModifySecurityGroupRuleRequest({
-            regionId: CONF.regionId,
-            securityGroupId: CONF.groupId,
-            securityGroupRuleId: RULE.id,
-            sourceCidrIp: ipMap[RULE.name],
-            description: `${RULE.name}@${current}`,
-            portRange: PORT_RANGE,
-          });
-          console.log('Rule to config', rule);
-          try {
-            const resp = await client.modifySecurityGroupRule(rule);
-            console.log('Config response', resp.body);
-          } catch (ex) {
-            if (ex.message.includes('RuleDuplicate')) {
-              console.log('Security group rule already exists, skip');
-              continue;
-            }
-            throw ex;
-          }
-        }
+        await handleEcsRuleConfig({ conf: CONF, ipMap, current, credential });
       }
       if (CONF.product === 'swas-open') {
-        const client = new SWASClient({
-          endpoint: `swas.${CONF.regionId}.aliyuncs.com`,
-          regionId: CONF.regionId,
-          ...credential,
-        });
-        for (const RULE of CONF.ruleList) {
-          const rule = new ModifyFirewallRuleRequest({
-            instanceId: CONF.instanceId,
-            ruleId: RULE.id,
-            sourceCidrIp: ipMap[RULE.name],
-            remark: `${RULE.name}@${current}`,
-            ruleProtocol: 'TCP',
-            port: PORT_RANGE,
-          });
-          console.log('Rule to config', rule);
-          try {
-            const resp = await client.modifyFirewallRule(rule);
-            console.log('Config response', resp.body);
-          } catch (ex) {
-            if (ex.message.includes('FirewallRuleAlreadyExist')) {
-              console.log('Firewall rule already exists, skip');
-              continue;
-            }
-            throw ex;
-          }
-        }
+        await handleSwasRuleConfig({ conf: CONF, ipMap, current, credential });
       }
     }
     return cb(null, true);
@@ -91,6 +61,220 @@ exports.handler = (evt, ctx, cb) => {
     cb(ex);
   });
 };
+
+async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
+  const client = new ECSClient({
+    endpoint: `ecs.${conf.regionId}.aliyuncs.com`,
+    ...credential,
+  });
+  const rules = await listEcsRules(client, conf);
+
+  for (const ruleConf of conf.ruleList) {
+    const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
+    const description = `${ruleConf.name}@${current}`;
+
+    for (const protocol of RULE_PROTOCOLS) {
+      const targetRule = findManagedRule({
+        rules,
+        ruleConf,
+        protocol,
+        idField: 'securityGroupRuleId',
+        protocolField: 'ipProtocol',
+        remarkField: 'description',
+        portField: 'portRange',
+      });
+
+      if (targetRule) {
+        const ruleId = targetRule.securityGroupRuleId;
+        const rule = new ModifySecurityGroupRuleRequest({
+          regionId: conf.regionId,
+          securityGroupId: conf.groupId,
+          securityGroupRuleId: ruleId,
+          sourceCidrIp,
+          description,
+          ipProtocol: protocol,
+          portRange: PORT_RANGE,
+        });
+        console.log('Rule to config', rule);
+        try {
+          const resp = await client.modifySecurityGroupRule(rule);
+          console.log('Config response', resp.body);
+          targetRule.sourceCidrIp = sourceCidrIp;
+          targetRule.description = description;
+        } catch (ex) {
+          if (ex.message.includes('RuleDuplicate')) {
+            console.log(`Security group ${protocol} rule already exists, skip`);
+            continue;
+          }
+          throw ex;
+        }
+        continue;
+      }
+
+      const createReq = new AuthorizeSecurityGroupRequest({
+        regionId: conf.regionId,
+        securityGroupId: conf.groupId,
+        sourceCidrIp,
+        description,
+        ipProtocol: protocol,
+        portRange: PORT_RANGE,
+      });
+      console.log('Rule to create', createReq);
+      try {
+        const resp = await client.authorizeSecurityGroup(createReq);
+        console.log('Create response', resp.body);
+        rules.push({
+          securityGroupRuleId: undefined,
+          sourceCidrIp,
+          description,
+          ipProtocol: protocol,
+          portRange: PORT_RANGE,
+        });
+      } catch (ex) {
+        if (ex.message.includes('AuthorizationAlreadyExist') || ex.message.includes('RuleDuplicate')) {
+          console.log(`Security group ${protocol} rule already exists, skip create`);
+          continue;
+        }
+        throw ex;
+      }
+    }
+  }
+}
+
+async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
+  const client = new SWASClient({
+    endpoint: `swas.${conf.regionId}.aliyuncs.com`,
+    regionId: conf.regionId,
+    ...credential,
+  });
+  const rules = await listSwasRules(client, conf);
+
+  for (const ruleConf of conf.ruleList) {
+    const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
+    const remark = `${ruleConf.name}@${current}`;
+
+    for (const protocol of RULE_PROTOCOLS) {
+      const targetRule = findManagedRule({
+        rules,
+        ruleConf,
+        protocol,
+        idField: 'ruleId',
+        protocolField: 'ruleProtocol',
+        remarkField: 'remark',
+        portField: 'port',
+      });
+
+      if (targetRule) {
+        const rule = new ModifyFirewallRuleRequest({
+          instanceId: conf.instanceId,
+          ruleId: getRuleField(targetRule, 'ruleId'),
+          sourceCidrIp,
+          remark,
+          ruleProtocol: protocol,
+          port: PORT_RANGE,
+        });
+        console.log('Rule to config', rule);
+        try {
+          const resp = await client.modifyFirewallRule(rule);
+          console.log('Config response', resp.body);
+          targetRule.sourceCidrIp = sourceCidrIp;
+          targetRule.remark = remark;
+        } catch (ex) {
+          if (ex.message.includes('FirewallRuleAlreadyExist')) {
+            console.log(`Firewall ${protocol} rule already exists, skip`);
+            continue;
+          }
+          throw ex;
+        }
+        continue;
+      }
+
+      const createReq = new CreateFirewallRulesRequest({
+        instanceId: conf.instanceId,
+        regionId: conf.regionId,
+        firewallRules: [{
+          port: PORT_RANGE,
+          ruleProtocol: protocol,
+          sourceCidrIp,
+          remark,
+        }],
+      });
+      console.log('Rule to create', createReq);
+      try {
+        const resp = await client.createFirewallRules(createReq);
+        console.log('Create response', resp.body);
+        rules.push({
+          ruleId: resp?.body?.firewallRuleIds?.[0] || resp?.body?.FirewallRuleIds?.[0],
+          sourceCidrIp,
+          remark,
+          ruleProtocol: protocol,
+          port: PORT_RANGE,
+        });
+      } catch (ex) {
+        if (ex.message.includes('FirewallRuleAlreadyExist')) {
+          console.log(`Firewall ${protocol} rule already exists, skip create`);
+          continue;
+        }
+        throw ex;
+      }
+    }
+  }
+}
+
+async function listEcsRules(client, conf) {
+  const req = new DescribeSecurityGroupAttributeRequest({
+    regionId: conf.regionId,
+    securityGroupId: conf.groupId,
+    direction: 'ingress',
+    maxResults: 1000,
+  });
+  const resp = await client.describeSecurityGroupAttribute(req);
+  return resp?.body?.permissions?.permission || [];
+}
+
+async function listSwasRules(client, conf) {
+  const req = new ListFirewallRulesRequest({
+    instanceId: conf.instanceId,
+    regionId: conf.regionId,
+    pageNumber: 1,
+    pageSize: 100,
+  });
+  const resp = await client.listFirewallRules(req);
+  return pickFirewallRules(resp.body);
+}
+
+function findManagedRule({ rules, ruleConf, protocol, idField, protocolField, remarkField, portField }) {
+  const configuredIds = getConfiguredRuleIds(ruleConf);
+  const configuredId = configuredIds[protocol];
+  if (configuredId) {
+    const exactRule = rules.find(rule => getRuleField(rule, idField) === configuredId);
+    if (exactRule) return exactRule;
+  }
+
+  const matchedByRemark = rules.find(rule => (
+    normalizeProtocol(getRuleField(rule, protocolField)) === protocol &&
+    getRuleField(rule, portField) === PORT_RANGE &&
+    hasRemarkPrefix(getRuleField(rule, remarkField) || '', ruleConf.name)
+  ));
+  if (matchedByRemark) return matchedByRemark;
+
+  if (!configuredIds.default) return null;
+  const defaultRule = rules.find(rule => getRuleField(rule, idField) === configuredIds.default);
+  if (!defaultRule) return null;
+  return normalizeProtocol(getRuleField(defaultRule, protocolField)) === protocol ? defaultRule : null;
+}
+
+function getConfiguredRuleIds(ruleConf) {
+  const configuredIds = {};
+  if (ruleConf.ids && typeof ruleConf.ids === 'object') {
+    for (const protocol of RULE_PROTOCOLS) {
+      const configuredId = ruleConf.ids[protocol];
+      if (configuredId) configuredIds[protocol] = configuredId;
+    }
+  }
+  if (ruleConf.id) configuredIds.default = ruleConf.id;
+  return configuredIds;
+}
 
 async function fetchDns(domain) {
   const url = `http://dns.alidns.com/resolve?name=${domain}&type=1`;
@@ -102,16 +286,4 @@ async function fetchDns(domain) {
   }
   const json = await response.json();
   return json.Answer[0].data;
-}
-
-function getDate() {
-  const now = new Date();
-
-  const month = String(now.getMonth() + 1).padStart(2, '0'); // 月份从 0 开始
-  const day = String(now.getDate()).padStart(2, '0');
-  const hours = String(now.getHours()).padStart(2, '0');
-  const minutes = String(now.getMinutes()).padStart(2, '0');
-  const seconds = String(now.getSeconds()).padStart(2, '0');
-
-  return `${month}-${day} ${hours}:${minutes}:${seconds}`;
 }

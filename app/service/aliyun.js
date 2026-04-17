@@ -1,11 +1,33 @@
 'use strict';
 
 const { Service } = require('egg');
-const { default: ECSClient, DescribeInstancesRequest, DescribeSecurityGroupsRequest, AuthorizeSecurityGroupRequest } = require('@alicloud/ecs20140526');
-const { default: SWASClient, ListInstancesRequest, ListFirewallRulesRequest, CreateFirewallRulesRequest } = require('@alicloud/swas-open20200601');
+const {
+  default: ECSClient,
+  DescribeInstancesRequest,
+  DescribeSecurityGroupAttributeRequest,
+  AuthorizeSecurityGroupRequest,
+  RevokeSecurityGroupRequest,
+} = require('@alicloud/ecs20140526');
+const {
+  default: SWASClient,
+  ListInstancesRequest,
+  ListFirewallRulesRequest,
+  CreateFirewallRulesRequest,
+  DeleteFirewallRulesRequest,
+} = require('@alicloud/swas-open20200601');
 const { resolveCredentials } = require('../../lib/aliyun-conf');
-
-const PORT_RANGE = '1/65535';
+const {
+  PORT_RANGE,
+  RULE_PROTOCOLS,
+  GD_WEB_RULE_PREFIX,
+  toSourceCidrIp,
+  normalizeProtocol,
+  formatDateTime,
+  pickFirewallRules,
+  getRuleField,
+  hasRemarkPrefix,
+  isRuleExpired,
+} = require('../../lib/firewall-rule');
 
 class AliyunService extends Service {
 
@@ -117,17 +139,21 @@ class AliyunService extends Service {
    */
   async addIpToWhitelist(ip, machines) {
     const credential = this.getCredential();
-    const sourceCidrIp = ip.includes('/') ? ip : `${ip}/32`;
-    const description = `gd-web@${this._formatDateTime()}`;
+    const sourceCidrIp = toSourceCidrIp(ip);
+    const description = `${GD_WEB_RULE_PREFIX}@${formatDateTime()}`;
     const results = [];
 
     for (const machine of machines) {
       try {
         if (machine.product === 'ecs') {
+          const cleanup = await this._cleanupExpiredWebRules(credential, machine);
           const result = await this._addIpToEcs(credential, machine, sourceCidrIp, description);
+          result.message = this._appendCleanupMessage(result.message, cleanup.deletedCount);
           results.push({ ...machine, ...result });
         } else if (machine.product === 'swas-open') {
+          const cleanup = await this._cleanupExpiredWebRules(credential, machine);
           const result = await this._addIpToSwas(credential, machine, sourceCidrIp, description);
+          result.message = this._appendCleanupMessage(result.message, cleanup.deletedCount);
           results.push({ ...machine, ...result });
         } else {
           results.push({ ...machine, status: 'skipped', message: `Unsupported product: ${machine.product}` });
@@ -154,25 +180,31 @@ class AliyunService extends Service {
       endpoint: `ecs.${regionId}.aliyuncs.com`,
       ...credential,
     });
+    const protocolResults = [];
 
-    const req = new AuthorizeSecurityGroupRequest({
-      regionId,
-      securityGroupId,
-      ipProtocol: 'TCP',
-      portRange: PORT_RANGE,
-      sourceCidrIp,
-      description,
-    });
+    for (const protocol of RULE_PROTOCOLS) {
+      const req = new AuthorizeSecurityGroupRequest({
+        regionId,
+        securityGroupId,
+        ipProtocol: protocol,
+        portRange: PORT_RANGE,
+        sourceCidrIp,
+        description,
+      });
 
-    try {
-      await client.authorizeSecurityGroup(req);
-      return { status: 'success', message: 'Rule added' };
-    } catch (err) {
-      if (err.message && err.message.includes('AuthorizationAlreadyExist')) {
-        return { status: 'success', message: 'Rule already exists' };
+      try {
+        await client.authorizeSecurityGroup(req);
+        protocolResults.push(`${protocol}: added`);
+      } catch (err) {
+        if (err.message && err.message.includes('AuthorizationAlreadyExist')) {
+          protocolResults.push(`${protocol}: already exists`);
+          continue;
+        }
+        throw new Error(`${protocol} rule failed: ${err.message}`);
       }
-      throw err;
     }
+
+    return { status: 'success', message: protocolResults.join(', ') };
   }
 
   /**
@@ -186,38 +218,130 @@ class AliyunService extends Service {
       regionId,
       ...credential,
     });
+    const protocolResults = [];
 
-    const req = new CreateFirewallRulesRequest({
-      instanceId,
-      regionId,
-      firewallRules: [{
-        port: PORT_RANGE,
-        ruleProtocol: 'TCP',
-        sourceCidrIp,
-        remark: description,
-      }],
-    });
+    for (const protocol of RULE_PROTOCOLS) {
+      const req = new CreateFirewallRulesRequest({
+        instanceId,
+        regionId,
+        firewallRules: [{
+          port: PORT_RANGE,
+          ruleProtocol: protocol,
+          sourceCidrIp,
+          remark: description,
+        }],
+      });
 
-    try {
-      await client.createFirewallRules(req);
-      return { status: 'success', message: 'Firewall rule added' };
-    } catch (err) {
-      if (err.message && err.message.includes('FirewallRuleAlreadyExist')) {
-        return { status: 'success', message: 'Firewall rule already exists' };
+      try {
+        await client.createFirewallRules(req);
+        protocolResults.push(`${protocol}: added`);
+      } catch (err) {
+        if (err.message && err.message.includes('FirewallRuleAlreadyExist')) {
+          protocolResults.push(`${protocol}: already exists`);
+          continue;
+        }
+        throw new Error(`${protocol} rule failed: ${err.message}`);
       }
-      throw err;
     }
+
+    return { status: 'success', message: protocolResults.join(', ') };
   }
 
-  _formatDateTime() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  async _cleanupExpiredWebRules(credential, machine) {
+    if (machine.product === 'ecs') {
+      return await this._cleanupExpiredEcsRules(credential, machine);
+    }
+    if (machine.product === 'swas-open') {
+      return await this._cleanupExpiredSwasRules(credential, machine);
+    }
+    return { deletedCount: 0 };
+  }
+
+  async _cleanupExpiredEcsRules(credential, machine) {
+    const { regionId, securityGroupId } = machine;
+    if (!securityGroupId) return { deletedCount: 0 };
+
+    const client = new ECSClient({
+      endpoint: `ecs.${regionId}.aliyuncs.com`,
+      ...credential,
+    });
+
+    const listReq = new DescribeSecurityGroupAttributeRequest({
+      regionId,
+      securityGroupId,
+      direction: 'ingress',
+      maxResults: 1000,
+    });
+    const listResp = await client.describeSecurityGroupAttribute(listReq);
+    const rules = listResp?.body?.permissions?.permission || [];
+    const staleRuleIds = rules
+      .filter(rule => this._isExpiredWebRule({
+        protocol: rule.ipProtocol,
+        port: rule.portRange,
+        remark: rule.description,
+      }))
+      .map(rule => rule.securityGroupRuleId)
+      .filter(Boolean);
+
+    if (staleRuleIds.length === 0) return { deletedCount: 0 };
+
+    const deleteReq = new RevokeSecurityGroupRequest({
+      regionId,
+      securityGroupId,
+      securityGroupRuleId: staleRuleIds,
+    });
+    await client.revokeSecurityGroup(deleteReq);
+    return { deletedCount: staleRuleIds.length };
+  }
+
+  async _cleanupExpiredSwasRules(credential, machine) {
+    const { regionId, instanceId } = machine;
+    const client = new SWASClient({
+      endpoint: `swas.${regionId}.aliyuncs.com`,
+      regionId,
+      ...credential,
+    });
+
+    const listReq = new ListFirewallRulesRequest({
+      instanceId,
+      regionId,
+      pageNumber: 1,
+      pageSize: 100,
+    });
+    const listResp = await client.listFirewallRules(listReq);
+    const rules = pickFirewallRules(listResp.body);
+    const staleRuleIds = rules
+      .filter(rule => this._isExpiredWebRule({
+        protocol: getRuleField(rule, 'ruleProtocol'),
+        port: getRuleField(rule, 'port'),
+        remark: getRuleField(rule, 'remark'),
+      }))
+      .map(rule => getRuleField(rule, 'ruleId'))
+      .filter(Boolean);
+
+    if (staleRuleIds.length === 0) return { deletedCount: 0 };
+
+    const deleteReq = new DeleteFirewallRulesRequest({
+      instanceId,
+      regionId,
+      ruleIds: staleRuleIds,
+    });
+    await client.deleteFirewallRules(deleteReq);
+    return { deletedCount: staleRuleIds.length };
+  }
+
+  _isExpiredWebRule({ protocol, port, remark }) {
+    return (
+      RULE_PROTOCOLS.includes(normalizeProtocol(protocol)) &&
+      port === PORT_RANGE &&
+      hasRemarkPrefix(remark, GD_WEB_RULE_PREFIX) &&
+      isRuleExpired(remark)
+    );
+  }
+
+  _appendCleanupMessage(message, deletedCount) {
+    if (!deletedCount) return message;
+    return `${message}; cleaned ${deletedCount} expired ${GD_WEB_RULE_PREFIX} rule(s)`;
   }
 }
 
