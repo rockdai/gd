@@ -8,9 +8,15 @@ const {
   toSourceCidrIp,
   normalizeIpForCompare,
   hasRemarkPrefix,
+  buildManagedDdnsRemark,
+  isManagedDdnsRemark,
+  buildManagedCliRemark,
+  isLegacyManagedCliRemark,
+  isManagedCliRemark,
   isRuleExpired,
   isExpiredWebRule,
   parseRuleTimestamp,
+  findManagedRule,
 } = require('../../lib/firewall-rule');
 
 describe('firewall-rule helpers', () => {
@@ -25,6 +31,19 @@ describe('firewall-rule helpers', () => {
     assert.strictEqual(hasRemarkPrefix('gd-web', 'gd-web'), true);
     assert.strictEqual(hasRemarkPrefix('gd-web@2026-04-17 12:00:00', 'gd-web'), true);
     assert.strictEqual(hasRemarkPrefix('other@2026-04-17 12:00:00', 'gd-web'), false);
+  });
+
+  it('distinguishes managed scheduler and cli remarks from manual remarks', () => {
+    const ddnsRemark = buildManagedDdnsRemark('xfyj.keydiary.dev', '2026-04-17 12:00:00');
+    const cliRemark = buildManagedCliRemark('ecs-dsec-handler', '2026-04-17 12:00:00');
+
+    assert.strictEqual(isManagedDdnsRemark(ddnsRemark, 'xfyj.keydiary.dev'), true);
+    assert.strictEqual(isManagedDdnsRemark('xfyj.keydiary.dev@2026-04-17 12:00:00', 'xfyj.keydiary.dev'), true);
+    assert.strictEqual(isManagedDdnsRemark('云谷园区', 'xfyj.keydiary.dev'), false);
+    assert.strictEqual(isLegacyManagedCliRemark('ecs-dsec-handler@2026-04-17 12:00:00', 'ecs-dsec-handler'), true);
+    assert.strictEqual(isManagedCliRemark(cliRemark, 'ecs-dsec-handler'), true);
+    assert.strictEqual(isManagedCliRemark('ecs-dsec-handler@2026-04-17 12:00:00', 'ecs-dsec-handler'), true);
+    assert.strictEqual(isManagedCliRemark('ecs-dsec-handler', 'ecs-dsec-handler'), false);
   });
 
   it('parses timestamps and judges expiry', () => {
@@ -62,5 +81,31 @@ describe('firewall-rule helpers', () => {
       .map(rule => rule.id);
 
     assert.deepStrictEqual(expiredIds, [ 'stale-tcp', 'stale-udp' ]);
+  });
+
+  it('ignores configured ids that point to non-managed rules', () => {
+    const ruleConf = {
+      name: 'xfyj.keydiary.dev',
+      id: 'manual-rule-id',
+    };
+    const rules = [ {
+      ruleId: 'manual-rule-id',
+      ruleProtocol: 'TCP',
+      port: PORT_RANGE,
+      remark: '云谷园区',
+    } ];
+
+    const matchedRule = findManagedRule({
+      rules,
+      ruleConf,
+      protocol: 'TCP',
+      idField: 'ruleId',
+      protocolField: 'ruleProtocol',
+      remarkField: 'remark',
+      portField: 'port',
+      remarkMatcher: value => isManagedDdnsRemark(value, ruleConf.name),
+    });
+
+    assert.strictEqual(matchedRule, null);
   });
 });
