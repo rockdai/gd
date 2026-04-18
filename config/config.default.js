@@ -36,8 +36,8 @@ module.exports = appInfo => {
   config.passkey = {
     enabled: process.env.PASSKEY_ENABLED !== 'false',
     rpName: process.env.PASSKEY_RP_NAME || 'GD',
-    rpID: process.env.PASSKEY_RP_ID || '',
-    origin: process.env.PASSKEY_ORIGIN || '',
+    rpID: process.env.PASSKEY_RP_ID || 'gd.rockdai.com',
+    origin: process.env.PASSKEY_ORIGIN || 'https://gd.rockdai.com',
     userName: process.env.PASSKEY_USER_NAME || 'admin',
     userDisplayName: process.env.PASSKEY_USER_DISPLAY_NAME || 'GD Admin',
     userID: process.env.PASSKEY_USER_ID || 'gd-admin',

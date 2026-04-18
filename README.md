@@ -52,7 +52,7 @@ npm run dev
 # 访问 http://127.0.0.1:7001
 ```
 
-> `Face ID / Passkey` 真机联调需要可信 HTTPS 域名和正确的 `PASSKEY_RP_ID` / `PASSKEY_ORIGIN`。`http://127.0.0.1:7001` 只适合普通密码登录开发。
+> 生产域名固定为 `https://gd.rockdai.com`，Passkey 默认也按这个域名配置。`http://127.0.0.1:7001` 只适合普通密码登录开发，不适合直接做 Passkey 真机联调。
 
 ### 命令行工具
 
@@ -121,8 +121,8 @@ Passkey 采用**单用户 allowlist** 模型：
 
 - `PASSKEY_ENABLED`：是否启用 passkey 能力，默认 `true`
 - `PASSKEY_RP_NAME`：显示给系统弹窗的站点名称，默认 `GD`
-- `PASSKEY_RP_ID`：可选，WebAuthn RP ID；不填时自动使用当前请求域名
-- `PASSKEY_ORIGIN`：可选，完整来源；不填时自动使用当前请求来源
+- `PASSKEY_RP_ID`：WebAuthn RP ID，默认 `gd.rockdai.com`
+- `PASSKEY_ORIGIN`：完整来源，默认 `https://gd.rockdai.com`
 - `PASSKEY_USER_NAME`：单用户逻辑用户名，默认 `admin`
 - `PASSKEY_USER_DISPLAY_NAME`：单用户显示名，默认 `GD Admin`
 - `PASSKEY_USER_ID`：单用户稳定 ID，默认 `gd-admin`
@@ -135,10 +135,10 @@ Passkey 采用**单用户 allowlist** 模型：
 ```bash
 PASSWORD='your-password'
 JWT_SECRET='replace-me'
+PASSKEY_RP_ID='gd.rockdai.com'
+PASSKEY_ORIGIN='https://gd.rockdai.com'
 PASSKEY_CREDENTIALS_JSON='[]'
 ```
-
-生产环境域名为 `https://gd.rockdai.com`。如果服务就是通过这个域名对外提供，通常不需要再额外配置 `PASSKEY_RP_ID` / `PASSKEY_ORIGIN`。
 
 ## 项目结构
 
