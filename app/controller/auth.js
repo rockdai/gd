@@ -1,8 +1,8 @@
 'use strict';
 
 const { Controller } = require('egg');
-const { sign } = require('jsonwebtoken');
 const crypto = require('crypto');
+const { issueAccessToken } = require('../../lib/access-token');
 
 /**
  * In-memory rate limiter for login attempts.
@@ -34,6 +34,12 @@ class AuthController extends Controller {
   async login() {
     const { ctx, app } = this;
     const { password } = ctx.request.body;
+
+    if (!app.config.auth.allowPasswordLogin) {
+      ctx.status = 403;
+      ctx.body = { success: false, message: '密码登录已禁用，请使用 Face ID / Passkey 登录' };
+      return;
+    }
 
     // --- rate-limit check ---
     const clientIp = ctx.ip;
@@ -79,15 +85,11 @@ class AuthController extends Controller {
     // --- success: issue JWT ---
     loginAttempts.delete(clientIp); // clear on success
 
-    const jwtSecret = app.config.jwt.secret;
-    const token = sign(
-      { iat: Math.floor(now / 1000) },
-      jwtSecret,
-      {
-        algorithm: 'HS256',
-        expiresIn: app.config.jwt.expiresIn || '24h',
-      }
-    );
+    const token = issueAccessToken({
+      secret: app.config.jwt.secret,
+      expiresIn: app.config.jwt.expiresIn || '24h',
+      method: 'password',
+    });
 
     ctx.body = { success: true, token };
   }

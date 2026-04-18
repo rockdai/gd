@@ -415,6 +415,44 @@
       margin-top: 12px;
     }
 
+    .login-divider {
+      color: #999;
+      font-size: 13px;
+      margin: 10px 0 14px;
+    }
+
+    .passkey-card-hint {
+      color: #666;
+      font-size: 14px;
+      line-height: 1.6;
+      margin: 0 0 16px;
+    }
+
+    .passkey-export {
+      margin-top: 16px;
+      text-align: left;
+    }
+
+    .passkey-export-label {
+      color: #666;
+      font-size: 13px;
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+
+    .passkey-export-textarea {
+      width: 100%;
+      min-height: 120px;
+      resize: vertical;
+      padding: 10px 12px;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.5;
+      box-sizing: border-box;
+      font-family: Menlo, Monaco, Consolas, monospace;
+    }
+
     /* Logout button in header */
     .btn-logout {
       position: absolute;
@@ -520,6 +558,20 @@
         </button>
       </div>
 
+      <div class="card" id="passkeyCard" style="display:none;">
+        <div class="card-title">Face ID / Passkey</div>
+        <p id="passkeyCardHint" class="passkey-card-hint">
+          绑定当前设备后，系统会返回一段 JSON。把它写入 `PASSKEY_CREDENTIALS_JSON` 并重启服务后，这台设备才能用于 Face ID 登录。
+        </p>
+        <button id="enrollPasskeyBtn" class="btn btn-primary btn-block" onclick="enrollPasskey()">
+          绑定当前设备
+        </button>
+        <div id="passkeyExportWrap" class="passkey-export" style="display:none;">
+          <div class="passkey-export-label">将下面的值写入环境变量 `PASSKEY_CREDENTIALS_JSON` 后重启服务：</div>
+          <textarea id="passkeyExportValue" class="passkey-export-textarea" readonly></textarea>
+        </div>
+      </div>
+
       <!-- Result Card (hidden by default) -->
       <div class="card" id="resultCard" style="display: none;">
         <div class="card-title">执行结果</div>
@@ -541,6 +593,10 @@
         <input type="password" id="loginPassword" class="login-input" placeholder="输入密码" autocomplete="current-password" required />
         <button type="submit" id="loginBtn" class="btn btn-primary btn-block">登录</button>
       </form>
+      <div id="loginDivider" class="login-divider" style="display:none;">或</div>
+      <button type="button" id="passkeyLoginBtn" class="btn btn-success btn-block" style="display:none;" onclick="handlePasskeyLogin()">
+        使用 Face ID 登录
+      </button>
       <p id="loginError" class="login-error" style="display:none;"></p>
     </div>
   </div>
@@ -552,6 +608,13 @@
     let machines = [];
     let authToken = localStorage.getItem('gd_token') || '';
     let loginViewportHandler = null;
+    let authStatus = {
+      passwordLoginEnabled: true,
+      passkeyReady: false,
+      passkeyConfigured: false,
+      passkeyEnrollmentEnabled: false,
+      approvedCredentialCount: 0,
+    };
 
     // =========== Auth helpers ===========
 
@@ -563,29 +626,110 @@
       document.body.classList.toggle('app-locked', locked);
     }
 
+    function supportsWebAuthn() {
+      return !!(window.PublicKeyCredential && navigator.credentials);
+    }
+
+    function setLoginError(message) {
+      const errorEl = document.getElementById('loginError');
+      errorEl.textContent = message || '';
+      errorEl.style.display = message ? 'block' : 'none';
+    }
+
+    function setPasskeyExport(value) {
+      const wrapEl = document.getElementById('passkeyExportWrap');
+      const textareaEl = document.getElementById('passkeyExportValue');
+      const text = value || '';
+      textareaEl.value = text;
+      wrapEl.style.display = text ? 'block' : 'none';
+    }
+
+    function updatePasskeyCard() {
+      const cardEl = document.getElementById('passkeyCard');
+      const hintEl = document.getElementById('passkeyCardHint');
+      const enrollBtn = document.getElementById('enrollPasskeyBtn');
+      const canShow = !!authToken && authStatus.passkeyReady && authStatus.passkeyEnrollmentEnabled;
+
+      cardEl.style.display = canShow ? 'block' : 'none';
+      if (!canShow) return;
+
+      hintEl.textContent = authStatus.approvedCredentialCount > 0
+        ? '已批准 ' + authStatus.approvedCredentialCount + ' 个设备。绑定新设备后，需要把导出的 JSON 写回 PASSKEY_CREDENTIALS_JSON 并重启服务。'
+        : '当前还没有已批准的设备。先在当前设备完成绑定，再把导出的 JSON 写入 PASSKEY_CREDENTIALS_JSON 并重启服务。';
+
+      enrollBtn.disabled = !supportsWebAuthn();
+      enrollBtn.textContent = supportsWebAuthn() ? '绑定当前设备' : '当前浏览器不支持 Face ID / Passkey';
+    }
+
+    async function refreshAuthStatus() {
+      try {
+        const resp = await fetch('/api/auth/status', { cache: 'no-store' });
+        const data = await resp.json();
+        if (data.success) {
+          authStatus = {
+            passwordLoginEnabled: !!data.passwordLoginEnabled,
+            passkeyReady: !!data.passkeyReady,
+            passkeyConfigured: !!data.passkeyConfigured,
+            passkeyEnrollmentEnabled: !!data.passkeyEnrollmentEnabled,
+            approvedCredentialCount: Number(data.approvedCredentialCount || 0),
+          };
+        }
+      } catch (err) {
+        console.warn('Failed to fetch auth status:', err);
+      }
+
+      updatePasskeyCard();
+    }
+
     function setLoginOverlayMode(mode) {
       const titleEl = document.getElementById('loginTitle');
       const hintEl = document.getElementById('loginHint');
       const formEl = document.getElementById('loginForm');
       const loadingEl = document.getElementById('loginLoading');
-      const errorEl = document.getElementById('loginError');
+      const dividerEl = document.getElementById('loginDivider');
+      const passkeyBtn = document.getElementById('passkeyLoginBtn');
+      const passwordInput = document.getElementById('loginPassword');
 
       if (mode === 'loading') {
         titleEl.textContent = '正在验证';
         hintEl.textContent = '正在恢复登录状态，请稍候...';
         formEl.style.display = 'none';
         loadingEl.style.display = 'flex';
-        errorEl.textContent = '';
-        errorEl.style.display = 'none';
+        dividerEl.style.display = 'none';
+        passkeyBtn.style.display = 'none';
+        setLoginError('');
         return;
       }
 
       titleEl.textContent = '🔐 身份验证';
-      hintEl.textContent = '请输入访问密码以继续';
-      formEl.style.display = 'block';
+      const passkeySupported = supportsWebAuthn();
+      const showPasswordLogin = authStatus.passwordLoginEnabled;
+      const hasApprovedPasskey = authStatus.passkeyReady && authStatus.passkeyConfigured;
+      const showPasskeyButton = hasApprovedPasskey;
+      const canUsePasskey = hasApprovedPasskey && passkeySupported;
+
+      if (!showPasswordLogin && !canUsePasskey) {
+        hintEl.textContent = hasApprovedPasskey
+          ? '当前浏览器不支持已批准的 Face ID / Passkey 登录，请改用支持 WebAuthn 的浏览器。'
+          : '当前未配置可用的登录方式，请先启用密码登录或写入 PASSKEY_CREDENTIALS_JSON。';
+      } else if (!showPasswordLogin && canUsePasskey) {
+        hintEl.textContent = '此服务仅允许已批准的 Face ID / Passkey 登录。';
+      } else if (showPasswordLogin && hasApprovedPasskey) {
+        hintEl.textContent = passkeySupported
+          ? '可以使用密码登录，或使用已批准的 Face ID / Passkey。'
+          : '当前浏览器不支持 Face ID / Passkey，仍可使用密码登录。';
+      } else {
+        hintEl.textContent = '请输入访问密码以继续。';
+      }
+
+      formEl.style.display = showPasswordLogin ? 'block' : 'none';
       loadingEl.style.display = 'none';
-      errorEl.textContent = '';
-      errorEl.style.display = 'none';
+      dividerEl.style.display = showPasswordLogin && showPasskeyButton ? 'block' : 'none';
+      passkeyBtn.style.display = showPasskeyButton ? 'block' : 'none';
+      passkeyBtn.disabled = !canUsePasskey;
+      passkeyBtn.textContent = canUsePasskey ? '使用 Face ID 登录' : '当前浏览器不支持 Face ID / Passkey';
+      passwordInput.required = showPasswordLogin;
+      setLoginError('');
     }
 
     /** Authenticated fetch wrapper – redirects to login on 401 */
@@ -596,6 +740,7 @@
         // Token expired or invalid
         authToken = '';
         localStorage.removeItem('gd_token');
+        updatePasskeyCard();
         showLoginOverlay('login');
         throw new Error('AUTH_REQUIRED');
       }
@@ -634,7 +779,7 @@
       setAppLocked(true);
       document.getElementById('logoutBtn').style.display = 'none';
       setupLoginViewportListeners();
-      if (mode === 'login') {
+      if (mode === 'login' && authStatus.passwordLoginEnabled) {
         document.getElementById('loginPassword').focus();
       }
     }
@@ -646,15 +791,27 @@
       removeLoginViewportListeners();
     }
 
+    function storeAuthToken(token) {
+      authToken = token;
+      localStorage.setItem('gd_token', authToken);
+      updatePasskeyCard();
+    }
+
+    async function finishLogin(token) {
+      storeAuthToken(token);
+      hideLoginOverlay();
+      refreshIp();
+      refreshMachines();
+    }
+
     async function handleLogin(e) {
       e.preventDefault();
       const btn = document.getElementById('loginBtn');
-      const errEl = document.getElementById('loginError');
       const password = document.getElementById('loginPassword').value;
 
       btn.disabled = true;
       btn.textContent = '登录中...';
-      errEl.style.display = 'none';
+      setLoginError('');
 
       try {
         const resp = await fetch('/api/login', {
@@ -665,23 +822,197 @@
         const data = await resp.json();
 
         if (data.success && data.token) {
-          authToken = data.token;
-          localStorage.setItem('gd_token', authToken);
-          hideLoginOverlay();
-          // Now load data
-          refreshIp();
-          refreshMachines();
+          await finishLogin(data.token);
         } else {
-          errEl.textContent = data.message || '登录失败';
-          errEl.style.display = 'block';
+          setLoginError(data.message || '登录失败');
         }
       } catch (err) {
-        errEl.textContent = '网络错误，请重试';
-        errEl.style.display = 'block';
+        setLoginError('网络错误，请重试');
       }
 
       btn.disabled = false;
       btn.textContent = '登录';
+    }
+
+    function base64UrlToUint8Array(base64url) {
+      const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    }
+
+    function arrayBufferToBase64Url(buffer) {
+      const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    }
+
+    function decodeCreationOptions(optionsJSON) {
+      const options = Object.assign({}, optionsJSON);
+      options.challenge = base64UrlToUint8Array(optionsJSON.challenge);
+      options.user = Object.assign({}, optionsJSON.user, {
+        id: base64UrlToUint8Array(optionsJSON.user.id),
+      });
+      if (Array.isArray(optionsJSON.excludeCredentials)) {
+        options.excludeCredentials = optionsJSON.excludeCredentials.map(credential => Object.assign({}, credential, {
+          id: base64UrlToUint8Array(credential.id),
+        }));
+      }
+      return options;
+    }
+
+    function decodeRequestOptions(optionsJSON) {
+      const options = Object.assign({}, optionsJSON);
+      options.challenge = base64UrlToUint8Array(optionsJSON.challenge);
+      if (Array.isArray(optionsJSON.allowCredentials)) {
+        options.allowCredentials = optionsJSON.allowCredentials.map(credential => Object.assign({}, credential, {
+          id: base64UrlToUint8Array(credential.id),
+        }));
+      }
+      return options;
+    }
+
+    function serializeRegistrationCredential(credential) {
+      return {
+        id: credential.id,
+        rawId: arrayBufferToBase64Url(credential.rawId),
+        type: credential.type,
+        authenticatorAttachment: credential.authenticatorAttachment,
+        clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
+        response: {
+          attestationObject: arrayBufferToBase64Url(credential.response.attestationObject),
+          clientDataJSON: arrayBufferToBase64Url(credential.response.clientDataJSON),
+          transports: credential.response.getTransports ? credential.response.getTransports() : [],
+          publicKey: credential.response.getPublicKey ? arrayBufferToBase64Url(credential.response.getPublicKey()) : undefined,
+          publicKeyAlgorithm: credential.response.getPublicKeyAlgorithm ? credential.response.getPublicKeyAlgorithm() : undefined,
+        },
+      };
+    }
+
+    function serializeAuthenticationCredential(credential) {
+      return {
+        id: credential.id,
+        rawId: arrayBufferToBase64Url(credential.rawId),
+        type: credential.type,
+        authenticatorAttachment: credential.authenticatorAttachment,
+        clientExtensionResults: credential.getClientExtensionResults ? credential.getClientExtensionResults() : {},
+        response: {
+          authenticatorData: arrayBufferToBase64Url(credential.response.authenticatorData),
+          clientDataJSON: arrayBufferToBase64Url(credential.response.clientDataJSON),
+          signature: arrayBufferToBase64Url(credential.response.signature),
+          userHandle: credential.response.userHandle ? arrayBufferToBase64Url(credential.response.userHandle) : undefined,
+        },
+      };
+    }
+
+    async function handlePasskeyLogin() {
+      if (!supportsWebAuthn()) {
+        setLoginError('当前浏览器不支持 Face ID / Passkey 登录');
+        return;
+      }
+
+      const btn = document.getElementById('passkeyLoginBtn');
+      btn.disabled = true;
+      btn.textContent = '验证中...';
+      setLoginError('');
+
+      try {
+        const optionsResp = await fetch('/api/passkey/auth/options', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const optionsData = await optionsResp.json();
+        if (!optionsData.success) {
+          throw new Error(optionsData.message || '无法发起 Face ID / Passkey 登录');
+        }
+
+        const credential = await navigator.credentials.get({
+          publicKey: decodeRequestOptions(optionsData.optionsJSON),
+        });
+        if (!credential) {
+          throw new Error('已取消 Face ID / Passkey 登录');
+        }
+
+        const verifyResp = await fetch('/api/passkey/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            credential: serializeAuthenticationCredential(credential),
+            flowToken: optionsData.flowToken,
+          }),
+        });
+        const verifyData = await verifyResp.json();
+        if (!verifyData.success || !verifyData.token) {
+          throw new Error(verifyData.message || 'Face ID / Passkey 登录失败');
+        }
+
+        await finishLogin(verifyData.token);
+      } catch (err) {
+        setLoginError(err.message || 'Face ID / Passkey 登录失败');
+      } finally {
+        btn.disabled = !supportsWebAuthn();
+        btn.textContent = supportsWebAuthn() ? '使用 Face ID 登录' : '当前浏览器不支持 Face ID / Passkey';
+      }
+    }
+
+    async function enrollPasskey() {
+      if (!supportsWebAuthn()) {
+        showToast('当前浏览器不支持 Face ID / Passkey 绑定', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('enrollPasskeyBtn');
+      btn.disabled = true;
+      btn.textContent = '绑定中...';
+      setPasskeyExport('');
+
+      try {
+        const optionsResp = await authFetch('/api/passkey/register/options', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+        const optionsData = await optionsResp.json();
+        if (!optionsData.success) {
+          throw new Error(optionsData.message || '无法发起当前设备绑定');
+        }
+
+        const credential = await navigator.credentials.create({
+          publicKey: decodeCreationOptions(optionsData.optionsJSON),
+        });
+        if (!credential) {
+          throw new Error('已取消当前设备绑定');
+        }
+
+        const verifyResp = await authFetch('/api/passkey/register/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            credential: serializeRegistrationCredential(credential),
+            flowToken: optionsData.flowToken,
+          }),
+        });
+        const verifyData = await verifyResp.json();
+        if (!verifyData.success) {
+          throw new Error(verifyData.message || '无法完成当前设备绑定');
+        }
+
+        setPasskeyExport(verifyData.approvedCredentialsJson || '');
+        showToast('当前设备已完成绑定验证。把返回 JSON 写入 PASSKEY_CREDENTIALS_JSON 并重启服务后即可使用 Face ID 登录。', 'success');
+      } catch (err) {
+        if (err.message !== 'AUTH_REQUIRED') {
+          showToast(err.message || '无法完成当前设备绑定', 'error');
+        }
+      } finally {
+        btn.disabled = !supportsWebAuthn();
+        btn.textContent = supportsWebAuthn() ? '绑定当前设备' : '当前浏览器不支持 Face ID / Passkey';
+      }
     }
 
     function logout() {
@@ -689,20 +1020,25 @@
       localStorage.removeItem('gd_token');
       machines = [];
       currentIp = '';
+      setPasskeyExport('');
       document.getElementById('machineListContainer').innerHTML = '<div class="empty-state">请先登录</div>';
       document.getElementById('currentIp').textContent = '-';
       document.getElementById('ipLocation').textContent = '';
+      updatePasskeyCard();
       showLoginOverlay();
     }
 
     // =========== Initialize ===========
 
     document.addEventListener('DOMContentLoaded', async () => {
+      await refreshAuthStatus();
+
       if (authToken) {
         showLoginOverlay('loading');
         const machineResult = await refreshMachines();
         if (machineResult.success) {
           hideLoginOverlay();
+          updatePasskeyCard();
           refreshIp();
         } else if (machineResult.authRequired) {
           showLoginOverlay('login');

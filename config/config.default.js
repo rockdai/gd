@@ -33,6 +33,24 @@ module.exports = appInfo => {
     expiresIn: '24h',
   };
 
+  config.auth = {
+    // Keep password login as a bootstrap / recovery path unless explicitly disabled.
+    allowPasswordLogin: process.env.ALLOW_PASSWORD_LOGIN !== 'false',
+  };
+
+  config.passkey = {
+    enabled: process.env.PASSKEY_ENABLED !== 'false',
+    rpName: process.env.PASSKEY_RP_NAME || 'GD',
+    rpID: process.env.PASSKEY_RP_ID || '',
+    origin: process.env.PASSKEY_ORIGIN || '',
+    userName: process.env.PASSKEY_USER_NAME || 'admin',
+    userDisplayName: process.env.PASSKEY_USER_DISPLAY_NAME || 'GD Admin',
+    userID: process.env.PASSKEY_USER_ID || 'gd-admin',
+    credentialsJson: process.env.PASSKEY_CREDENTIALS_JSON || '[]',
+    enrollmentEnabled: process.env.PASSKEY_ENROLLMENT_ENABLED !== 'false',
+    challengeExpiresInSec: Math.max(60, Number(process.env.PASSKEY_CHALLENGE_TTL_SEC || 300) || 300),
+  };
+
   // Register JWT auth middleware globally.
   // Paths that do NOT require authentication are listed in skipPaths.
   config.middleware = ['jwtAuth'];
@@ -40,6 +58,9 @@ module.exports = appInfo => {
     skipPaths: [
       '/',            // HTML shell (contains login form)
       '/api/login',   // Login endpoint itself
+      '/api/auth/status',
+      '/api/passkey/auth/options',
+      '/api/passkey/auth/verify',
       /^\/public\//,  // Static assets (JS, CSS, manifest, SW)
     ],
   };
