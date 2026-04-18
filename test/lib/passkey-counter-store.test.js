@@ -99,4 +99,39 @@ describe('lib/passkey-counter-store', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('keeps the queue usable after a task rejects', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gd-passkey-store-'));
+    const filePath = path.join(tempDir, 'counters.json');
+    const events = [];
+
+    try {
+      const first = serializeCredentialAssertion(filePath, 'credA', async () => {
+        events.push('first:start');
+        throw new Error('boom');
+      });
+
+      const second = serializeCredentialAssertion(filePath, 'credA', async () => {
+        events.push('second:start');
+        events.push('second:end');
+        return 'ok';
+      });
+
+      const firstResult = await first.then(
+        () => 'resolved',
+        err => err.message
+      );
+      const secondResult = await second;
+
+      assert.strictEqual(firstResult, 'boom');
+      assert.strictEqual(secondResult, 'ok');
+      assert.deepStrictEqual(events, [
+        'first:start',
+        'second:start',
+        'second:end',
+      ]);
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });
