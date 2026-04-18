@@ -24,8 +24,8 @@ class PasskeyService extends Service {
   getConfig() {
     const passkey = this.app.config.passkey;
     const credentials = parseCredentialEntries(passkey.credentialsJson);
-    const rpID = String(passkey.rpID || '').trim();
-    const origin = String(passkey.origin || '').trim();
+    const rpID = this.resolveRpID(passkey);
+    const origin = this.resolveOrigin(passkey);
     const enabled = passkey.enabled !== false;
     const ready = enabled && !!rpID && !!origin;
 
@@ -43,7 +43,6 @@ class PasskeyService extends Service {
     const config = this.getConfig();
 
     return {
-      passwordLoginEnabled: this.app.config.auth.allowPasswordLogin,
       passkeyConfigured: config.credentials.length > 0,
       passkeyEnrollmentEnabled: config.ready && config.enrollmentEnabled !== false,
       passkeyReady: config.ready,
@@ -249,6 +248,24 @@ class PasskeyService extends Service {
     }
 
     return payload;
+  }
+
+  resolveRpID(passkey) {
+    const configured = String(passkey.rpID || '').trim();
+    if (configured) return configured;
+
+    const runtimeHost = String(this.ctx && this.ctx.hostname || '').trim().toLowerCase();
+    return runtimeHost;
+  }
+
+  resolveOrigin(passkey) {
+    const configured = String(passkey.origin || '').trim();
+    if (configured) return configured;
+
+    const protocol = String(this.ctx && this.ctx.protocol || '').trim().toLowerCase();
+    const host = String(this.ctx && this.ctx.host || '').trim();
+    if (!protocol || !host) return '';
+    return `${protocol}://${host}`;
   }
 
   createPublicError(status, message) {

@@ -35,12 +35,6 @@ class AuthController extends Controller {
     const { ctx, app } = this;
     const { password } = ctx.request.body;
 
-    if (!app.config.auth.allowPasswordLogin) {
-      ctx.status = 403;
-      ctx.body = { success: false, message: '密码登录已禁用，请使用 Face ID / Passkey 登录' };
-      return;
-    }
-
     // --- rate-limit check ---
     const clientIp = ctx.ip;
     const now = Date.now();

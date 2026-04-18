@@ -33,11 +33,6 @@ module.exports = appInfo => {
     expiresIn: '24h',
   };
 
-  config.auth = {
-    // Keep password login as a bootstrap / recovery path unless explicitly disabled.
-    allowPasswordLogin: process.env.ALLOW_PASSWORD_LOGIN !== 'false',
-  };
-
   config.passkey = {
     enabled: process.env.PASSKEY_ENABLED !== 'false',
     rpName: process.env.PASSKEY_RP_NAME || 'GD',

@@ -609,7 +609,6 @@
     let authToken = localStorage.getItem('gd_token') || '';
     let loginViewportHandler = null;
     let authStatus = {
-      passwordLoginEnabled: true,
       passkeyReady: false,
       passkeyConfigured: false,
       passkeyEnrollmentEnabled: false,
@@ -667,7 +666,6 @@
         const data = await resp.json();
         if (data.success) {
           authStatus = {
-            passwordLoginEnabled: !!data.passwordLoginEnabled,
             passkeyReady: !!data.passkeyReady,
             passkeyConfigured: !!data.passkeyConfigured,
             passkeyEnrollmentEnabled: !!data.passkeyEnrollmentEnabled,
@@ -703,18 +701,11 @@
 
       titleEl.textContent = '🔐 身份验证';
       const passkeySupported = supportsWebAuthn();
-      const showPasswordLogin = authStatus.passwordLoginEnabled;
       const hasApprovedPasskey = authStatus.passkeyReady && authStatus.passkeyConfigured;
       const showPasskeyButton = hasApprovedPasskey;
       const canUsePasskey = hasApprovedPasskey && passkeySupported;
 
-      if (!showPasswordLogin && !canUsePasskey) {
-        hintEl.textContent = hasApprovedPasskey
-          ? '当前浏览器不支持已批准的 Face ID / Passkey 登录，请改用支持 WebAuthn 的浏览器。'
-          : '当前未配置可用的登录方式，请先启用密码登录或写入 PASSKEY_CREDENTIALS_JSON。';
-      } else if (!showPasswordLogin && canUsePasskey) {
-        hintEl.textContent = '此服务仅允许已批准的 Face ID / Passkey 登录。';
-      } else if (showPasswordLogin && hasApprovedPasskey) {
+      if (hasApprovedPasskey) {
         hintEl.textContent = passkeySupported
           ? '可以使用密码登录，或使用已批准的 Face ID / Passkey。'
           : '当前浏览器不支持 Face ID / Passkey，仍可使用密码登录。';
@@ -722,13 +713,13 @@
         hintEl.textContent = '请输入访问密码以继续。';
       }
 
-      formEl.style.display = showPasswordLogin ? 'block' : 'none';
+      formEl.style.display = 'block';
       loadingEl.style.display = 'none';
-      dividerEl.style.display = showPasswordLogin && showPasskeyButton ? 'block' : 'none';
+      dividerEl.style.display = showPasskeyButton ? 'block' : 'none';
       passkeyBtn.style.display = showPasskeyButton ? 'block' : 'none';
       passkeyBtn.disabled = !canUsePasskey;
       passkeyBtn.textContent = canUsePasskey ? '使用 Face ID 登录' : '当前浏览器不支持 Face ID / Passkey';
-      passwordInput.required = showPasswordLogin;
+      passwordInput.required = true;
       setLoginError('');
     }
 
@@ -779,7 +770,7 @@
       setAppLocked(true);
       document.getElementById('logoutBtn').style.display = 'none';
       setupLoginViewportListeners();
-      if (mode === 'login' && authStatus.passwordLoginEnabled) {
+      if (mode === 'login') {
         document.getElementById('loginPassword').focus();
       }
     }

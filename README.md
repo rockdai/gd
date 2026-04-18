@@ -101,16 +101,12 @@ s deploy --type code
 
 ## 认证方式
 
-Web 端支持两种认证方式：
-
-- 密码登录：`PASSWORD` 环境变量控制，成功后服务端签发 JWT
-- Face ID / Passkey：只允许服务端环境变量中批准过的设备登录
-
-### 密码登录
+Web 端默认使用密码登录：
 
 - `PASSWORD`：访问密码
 - `JWT_SECRET`：JWT 签名密钥，建议显式配置，避免函数重启后令牌失效
-- `ALLOW_PASSWORD_LOGIN`：是否允许密码登录，默认 `true`
+
+在此基础上，你还可以额外启用 Face ID / Passkey。它是附加登录方式，不会替代或关闭默认密码登录。
 
 ### Face ID / Passkey
 
@@ -125,8 +121,8 @@ Passkey 采用**单用户 allowlist** 模型：
 
 - `PASSKEY_ENABLED`：是否启用 passkey 能力，默认 `true`
 - `PASSKEY_RP_NAME`：显示给系统弹窗的站点名称，默认 `GD`
-- `PASSKEY_RP_ID`：WebAuthn RP ID，通常是你的站点域名，例如 `gd.example.com`
-- `PASSKEY_ORIGIN`：完整来源，例如 `https://gd.example.com`
+- `PASSKEY_RP_ID`：可选，WebAuthn RP ID；不填时自动使用当前请求域名
+- `PASSKEY_ORIGIN`：可选，完整来源；不填时自动使用当前请求来源
 - `PASSKEY_USER_NAME`：单用户逻辑用户名，默认 `admin`
 - `PASSKEY_USER_DISPLAY_NAME`：单用户显示名，默认 `GD Admin`
 - `PASSKEY_USER_ID`：单用户稳定 ID，默认 `gd-admin`
@@ -139,10 +135,10 @@ Passkey 采用**单用户 allowlist** 模型：
 ```bash
 PASSWORD='your-password'
 JWT_SECRET='replace-me'
-PASSKEY_RP_ID='gd.example.com'
-PASSKEY_ORIGIN='https://gd.example.com'
 PASSKEY_CREDENTIALS_JSON='[]'
 ```
+
+生产环境域名为 `https://gd.rockdai.com`。如果服务就是通过这个域名对外提供，通常不需要再额外配置 `PASSKEY_RP_ID` / `PASSKEY_ORIGIN`。
 
 ## 项目结构
 
