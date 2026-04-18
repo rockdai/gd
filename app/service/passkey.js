@@ -15,6 +15,10 @@ const {
   serializeCredentialEntries,
   toVerificationCredential,
 } = require('../../lib/passkey');
+const {
+  persistCredentialCounter,
+  readCounterStore,
+} = require('../../lib/passkey-counter-store');
 
 const FLOW_PURPOSE = 'gd-passkey-flow';
 const FLOW_ACTION_AUTH = 'auth';
@@ -95,6 +99,14 @@ class PasskeyService extends Service {
       throw this.createPublicError(401, '当前设备未获准登录');
     }
 
+    let effectiveCredential;
+    try {
+      effectiveCredential = await this.buildEffectiveCredential(approvedCredential);
+    } catch (err) {
+      this.ctx.logger.error('[passkey/auth] Failed to load passkey counter store: %s', err.stack || err.message);
+      throw this.createPublicError(500, '无法读取 passkey 计数器状态');
+    }
+
     let verification;
     try {
       verification = await verifyAuthenticationResponse({
@@ -102,7 +114,7 @@ class PasskeyService extends Service {
         expectedChallenge: payload.challenge,
         expectedOrigin: config.origin,
         expectedRPID: config.rpID,
-        credential: toVerificationCredential(approvedCredential),
+        credential: toVerificationCredential(effectiveCredential),
       });
     } catch (err) {
       this.ctx.logger.warn('[passkey/auth] Verification failed: %s', err.message);
@@ -114,16 +126,17 @@ class PasskeyService extends Service {
     }
 
     const newCounter = verification.authenticationInfo && verification.authenticationInfo.newCounter;
-    const updatedCredentialsJson = Number.isInteger(newCounter) && newCounter !== approvedCredential.counter
-      ? serializeCredentialEntries(mergeCredentialEntries(config.credentials, {
-        ...approvedCredential,
-        counter: newCounter,
-      }))
-      : null;
+    if (Number.isInteger(newCounter) && newCounter > effectiveCredential.counter) {
+      try {
+        await persistCredentialCounter(config.counterStoreFile, credentialId, newCounter);
+      } catch (err) {
+        this.ctx.logger.error('[passkey/auth] Failed to persist passkey counter: %s', err.stack || err.message);
+        throw this.createPublicError(500, '无法持久化 passkey 计数器状态');
+      }
+    }
 
     return {
       credentialId,
-      updatedCredentialsJson,
     };
   }
 
@@ -217,7 +230,7 @@ class PasskeyService extends Service {
         action,
         challenge,
       },
-      this.app.config.jwt.secret,
+      this.app.config.passkey.flowTokenSecret,
       {
         algorithm: 'HS256',
         expiresIn: this.app.config.passkey.challengeExpiresInSec,
@@ -232,7 +245,7 @@ class PasskeyService extends Service {
 
     let payload;
     try {
-      payload = verify(flowToken, this.app.config.jwt.secret, {
+      payload = verify(flowToken, this.app.config.passkey.flowTokenSecret, {
         algorithms: [ 'HS256' ],
       });
     } catch (err) {
@@ -249,6 +262,17 @@ class PasskeyService extends Service {
 
     return payload;
   }
+
+  async buildEffectiveCredential(approvedCredential) {
+    const counters = await readCounterStore(this.app.config.passkey.counterStoreFile);
+    const storedCounter = Number.isInteger(counters[approvedCredential.id]) ? counters[approvedCredential.id] : 0;
+
+    return {
+      ...approvedCredential,
+      counter: Math.max(approvedCredential.counter, storedCounter),
+    };
+  }
+
   createPublicError(status, message) {
     const err = new Error(message);
     err.status = status;

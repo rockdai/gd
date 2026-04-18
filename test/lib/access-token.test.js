@@ -15,6 +15,7 @@ describe('lib/access-token', () => {
     });
 
     const payload = verify(token, 'test-secret', { algorithms: [ 'HS256' ] });
+    assert.strictEqual(payload.purpose, 'access');
     assert.strictEqual(payload.sub, 'admin');
     assert.strictEqual(payload.authMethod, 'passkey');
     assert.strictEqual(payload.scope, 'admin');

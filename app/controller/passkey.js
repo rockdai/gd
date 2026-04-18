@@ -42,7 +42,6 @@ class PasskeyController extends Controller {
           expiresIn: app.config.jwt.expiresIn,
           method: 'passkey',
         }),
-        updatedCredentialsJson: result.updatedCredentialsJson,
       };
     } catch (err) {
       this.handleError('passkey/verify-auth', err);

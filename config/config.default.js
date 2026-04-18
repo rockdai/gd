@@ -44,6 +44,11 @@ module.exports = appInfo => {
     credentialsJson: process.env.PASSKEY_CREDENTIALS_JSON || '[]',
     enrollmentEnabled: process.env.PASSKEY_ENROLLMENT_ENABLED !== 'false',
     challengeExpiresInSec: Math.max(60, Number(process.env.PASSKEY_CHALLENGE_TTL_SEC || 300) || 300),
+    flowTokenSecret: process.env.PASSKEY_FLOW_TOKEN_SECRET || crypto
+      .createHash('sha256')
+      .update(`gd-passkey-flow:${config.jwt.secret}`)
+      .digest('hex'),
+    counterStoreFile: process.env.PASSKEY_COUNTERS_FILE || path.join(appInfo.baseDir, 'run', 'passkey-counters.json'),
   };
 
   // Register JWT auth middleware globally.

@@ -1,6 +1,7 @@
 'use strict';
 
 const { verify } = require('jsonwebtoken');
+const { ACCESS_TOKEN_PURPOSE } = require('../../lib/access-token');
 
 /**
  * JWT authentication middleware for Egg.js
@@ -39,6 +40,9 @@ module.exports = (options, app) => {
       const decoded = verify(token, app.config.jwt.secret, {
         algorithms: ['HS256'],
       });
+      if (decoded.purpose !== ACCESS_TOKEN_PURPOSE || decoded.sub !== 'admin') {
+        throw new Error('Invalid access token purpose');
+      }
       ctx.state.user = decoded;
       await next();
     } catch (err) {

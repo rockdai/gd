@@ -129,6 +129,8 @@ Passkey 采用**单用户 allowlist** 模型：
 - `PASSKEY_CREDENTIALS_JSON`：已批准 passkey allowlist，默认 `[]`
 - `PASSKEY_ENROLLMENT_ENABLED`：是否允许已登录用户继续绑定新设备，默认 `true`
 - `PASSKEY_CHALLENGE_TTL_SEC`：passkey 挑战票据有效期，默认 `300`
+- `PASSKEY_FLOW_TOKEN_SECRET`：passkey challenge token 专用签名密钥；默认由 `JWT_SECRET` 派生
+- `PASSKEY_COUNTERS_FILE`：服务端持久化 passkey counter 的文件路径，默认 `run/passkey-counters.json`
 
 示例：
 
