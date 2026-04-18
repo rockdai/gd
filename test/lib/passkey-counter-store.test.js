@@ -8,6 +8,7 @@ const path = require('path');
 const {
   persistCredentialCounter,
   readCounterStore,
+  serializeCredentialAssertion,
   writeCounterStore,
 } = require('../../lib/passkey-counter-store');
 
@@ -65,6 +66,35 @@ describe('lib/passkey-counter-store', () => {
         credA: 8,
         credB: 7,
       });
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('serializes full assertion work for the same credential', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gd-passkey-store-'));
+    const filePath = path.join(tempDir, 'counters.json');
+    const events = [];
+
+    try {
+      await Promise.all([
+        serializeCredentialAssertion(filePath, 'credA', async () => {
+          events.push('first:start');
+          await new Promise(resolve => setTimeout(resolve, 20));
+          events.push('first:end');
+        }),
+        serializeCredentialAssertion(filePath, 'credA', async () => {
+          events.push('second:start');
+          events.push('second:end');
+        }),
+      ]);
+
+      assert.deepStrictEqual(events, [
+        'first:start',
+        'first:end',
+        'second:start',
+        'second:end',
+      ]);
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }

@@ -21,14 +21,16 @@
       color: #333;
       min-height: 100vh;
       min-height: 100dvh;
-      overflow: hidden;
+      overflow-x: hidden;
+      overflow-y: hidden;
     }
 
     .app-shell {
       display: flex;
       flex-direction: column;
-      min-height: 100vh;
-      min-height: 100dvh;
+      height: 100vh;
+      height: 100dvh;
+      min-height: 0;
     }
 
     body.app-locked .app-shell {
@@ -61,6 +63,7 @@
       padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
       padding-left: calc(16px + env(safe-area-inset-left, 0px));
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;

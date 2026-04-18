@@ -18,6 +18,7 @@ const {
 const {
   persistCredentialCounter,
   readCounterStore,
+  serializeCredentialAssertion,
 } = require('../../lib/passkey-counter-store');
 
 const FLOW_PURPOSE = 'gd-passkey-flow';
@@ -99,45 +100,47 @@ class PasskeyService extends Service {
       throw this.createPublicError(401, '当前设备未获准登录');
     }
 
-    let effectiveCredential;
-    try {
-      effectiveCredential = await this.buildEffectiveCredential(approvedCredential);
-    } catch (err) {
-      this.ctx.logger.error('[passkey/auth] Failed to load passkey counter store: %s', err.stack || err.message);
-      throw this.createPublicError(500, '无法读取 passkey 计数器状态');
-    }
-
-    let verification;
-    try {
-      verification = await verifyAuthenticationResponse({
-        response,
-        expectedChallenge: payload.challenge,
-        expectedOrigin: config.origin,
-        expectedRPID: config.rpID,
-        credential: toVerificationCredential(effectiveCredential),
-      });
-    } catch (err) {
-      this.ctx.logger.warn('[passkey/auth] Verification failed: %s', err.message);
-      throw this.createPublicError(401, 'Face ID / Passkey 验证失败');
-    }
-
-    if (!verification.verified) {
-      throw this.createPublicError(401, 'Face ID / Passkey 验证失败');
-    }
-
-    const newCounter = verification.authenticationInfo && verification.authenticationInfo.newCounter;
-    if (Number.isInteger(newCounter) && newCounter > effectiveCredential.counter) {
+    return await serializeCredentialAssertion(config.counterStoreFile, credentialId, async () => {
+      let effectiveCredential;
       try {
-        await persistCredentialCounter(config.counterStoreFile, credentialId, newCounter);
+        effectiveCredential = await this.buildEffectiveCredential(approvedCredential);
       } catch (err) {
-        this.ctx.logger.error('[passkey/auth] Failed to persist passkey counter: %s', err.stack || err.message);
-        throw this.createPublicError(500, '无法持久化 passkey 计数器状态');
+        this.ctx.logger.error('[passkey/auth] Failed to load passkey counter store: %s', err.stack || err.message);
+        throw this.createPublicError(500, '无法读取 passkey 计数器状态');
       }
-    }
 
-    return {
-      credentialId,
-    };
+      let verification;
+      try {
+        verification = await verifyAuthenticationResponse({
+          response,
+          expectedChallenge: payload.challenge,
+          expectedOrigin: config.origin,
+          expectedRPID: config.rpID,
+          credential: toVerificationCredential(effectiveCredential),
+        });
+      } catch (err) {
+        this.ctx.logger.warn('[passkey/auth] Verification failed: %s', err.message);
+        throw this.createPublicError(401, 'Face ID / Passkey 验证失败');
+      }
+
+      if (!verification.verified) {
+        throw this.createPublicError(401, 'Face ID / Passkey 验证失败');
+      }
+
+      const newCounter = verification.authenticationInfo && verification.authenticationInfo.newCounter;
+      if (Number.isInteger(newCounter) && newCounter > effectiveCredential.counter) {
+        try {
+          await persistCredentialCounter(config.counterStoreFile, credentialId, newCounter);
+        } catch (err) {
+          this.ctx.logger.error('[passkey/auth] Failed to persist passkey counter: %s', err.stack || err.message);
+          throw this.createPublicError(500, '无法持久化 passkey 计数器状态');
+        }
+      }
+
+      return {
+        credentialId,
+      };
+    });
   }
 
   async generateRegistrationOptions() {
