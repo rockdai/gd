@@ -43,4 +43,30 @@ describe('lib/passkey-counter-store', () => {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('serializes concurrent updates so newer counters are not overwritten', async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gd-passkey-store-'));
+    const filePath = path.join(tempDir, 'counters.json');
+
+    try {
+      await writeCounterStore(filePath, {
+        credA: 1,
+        credB: 4,
+      });
+
+      await Promise.all([
+        persistCredentialCounter(filePath, 'credA', 6),
+        persistCredentialCounter(filePath, 'credB', 7),
+        persistCredentialCounter(filePath, 'credA', 8),
+      ]);
+
+      const counters = await readCounterStore(filePath);
+      assert.deepStrictEqual(counters, {
+        credA: 8,
+        credB: 7,
+      });
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
 });
