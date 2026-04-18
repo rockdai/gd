@@ -1,8 +1,8 @@
 'use strict';
 
 const { Controller } = require('egg');
-const { sign } = require('jsonwebtoken');
 const crypto = require('crypto');
+const { issueAccessToken } = require('../../lib/access-token');
 
 /**
  * In-memory rate limiter for login attempts.
@@ -79,15 +79,11 @@ class AuthController extends Controller {
     // --- success: issue JWT ---
     loginAttempts.delete(clientIp); // clear on success
 
-    const jwtSecret = app.config.jwt.secret;
-    const token = sign(
-      { iat: Math.floor(now / 1000) },
-      jwtSecret,
-      {
-        algorithm: 'HS256',
-        expiresIn: app.config.jwt.expiresIn || '24h',
-      }
-    );
+    const token = issueAccessToken({
+      secret: app.config.jwt.secret,
+      expiresIn: app.config.jwt.expiresIn || '24h',
+      method: 'password',
+    });
 
     ctx.body = { success: true, token };
   }

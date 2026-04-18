@@ -33,6 +33,24 @@ module.exports = appInfo => {
     expiresIn: '24h',
   };
 
+  config.passkey = {
+    enabled: process.env.PASSKEY_ENABLED !== 'false',
+    rpName: process.env.PASSKEY_RP_NAME || 'GD',
+    rpID: process.env.PASSKEY_RP_ID || 'gd.rockdai.com',
+    origin: process.env.PASSKEY_ORIGIN || 'https://gd.rockdai.com',
+    userName: process.env.PASSKEY_USER_NAME || 'admin',
+    userDisplayName: process.env.PASSKEY_USER_DISPLAY_NAME || 'GD Admin',
+    userID: process.env.PASSKEY_USER_ID || 'gd-admin',
+    credentialsJson: process.env.PASSKEY_CREDENTIALS_JSON || '[]',
+    enrollmentEnabled: process.env.PASSKEY_ENROLLMENT_ENABLED !== 'false',
+    challengeExpiresInSec: Math.max(60, Number(process.env.PASSKEY_CHALLENGE_TTL_SEC || 300) || 300),
+    flowTokenSecret: process.env.PASSKEY_FLOW_TOKEN_SECRET || crypto
+      .createHash('sha256')
+      .update(`gd-passkey-flow:${config.jwt.secret}`)
+      .digest('hex'),
+    counterStoreFile: process.env.PASSKEY_COUNTERS_FILE || path.join(appInfo.baseDir, 'run', 'passkey-counters.json'),
+  };
+
   // Register JWT auth middleware globally.
   // Paths that do NOT require authentication are listed in skipPaths.
   config.middleware = ['jwtAuth'];
@@ -40,6 +58,9 @@ module.exports = appInfo => {
     skipPaths: [
       '/',            // HTML shell (contains login form)
       '/api/login',   // Login endpoint itself
+      '/api/auth/status',
+      '/api/passkey/auth/options',
+      '/api/passkey/auth/verify',
       /^\/public\//,  // Static assets (JS, CSS, manifest, SW)
     ],
   };
