@@ -16,6 +16,7 @@ const {
   PORT_RANGE,
   RULE_PROTOCOLS,
   toSourceCidrIp,
+  normalizeIpForCompare,
   formatDateTime,
   getRuleField,
   buildManagedDdnsRemark,
@@ -185,6 +186,7 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
 
   for (const ruleConf of conf.ruleList) {
     const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
+    const sourceCidrIpNorm = normalizeIpForCompare(sourceCidrIp);
     const remark = buildManagedDdnsRemark(ruleConf.name, current);
 
     for (const protocol of RULE_PROTOCOLS) {
@@ -192,6 +194,9 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
         String(getRuleField(rule, 'ruleProtocol') || '').toUpperCase() === protocol &&
         getRuleField(rule, 'port') === PORT_RANGE &&
         isManagedDdnsRemark(getRuleField(rule, 'remark') || '', ruleConf.name)
+      ));
+      const currentIpRule = matchedRules.find(rule => (
+        normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === sourceCidrIpNorm
       ));
       const targetRule = findManagedRule({
         rules,
@@ -202,13 +207,14 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
         remarkField: 'remark',
         portField: 'port',
         remarkMatcher: value => isManagedDdnsRemark(value, ruleConf.name),
-      }) || matchedRules[0];
-      const staleRules = matchedRules.filter(rule => rule !== targetRule);
+      });
+      const ruleToKeep = currentIpRule || targetRule;
+      const staleRules = matchedRules.filter(rule => rule !== ruleToKeep);
 
-      if (targetRule) {
+      if (ruleToKeep) {
         const rule = new ModifyFirewallRuleRequest({
           instanceId: conf.instanceId,
-          ruleId: getRuleField(targetRule, 'ruleId'),
+          ruleId: getRuleField(ruleToKeep, 'ruleId'),
           sourceCidrIp,
           remark,
           ruleProtocol: protocol,
@@ -218,11 +224,12 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
         try {
           const resp = await client.modifyFirewallRule(rule);
           console.log('Config response', resp.body);
-          targetRule.sourceCidrIp = sourceCidrIp;
-          targetRule.remark = remark;
+          ruleToKeep.sourceCidrIp = sourceCidrIp;
+          ruleToKeep.remark = remark;
         } catch (ex) {
           if (ex.message.includes('FirewallRuleAlreadyExist')) {
-            console.log(`Firewall ${protocol} rule already exists, try cleanup duplicates`);
+            console.log(`Firewall ${protocol} rule already exists, skip`);
+            continue;
           } else {
             errors.push(buildRuleError({
               conf,
@@ -274,8 +281,9 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
 
       if (staleRules.length > 0) {
         try {
-          const ruleIds = staleRules.map(rule => getRuleField(rule, 'ruleId')).filter(Boolean);
-          if (ruleIds.length > 0) {
+          const staleRulesToDelete = staleRules.filter(rule => getRuleField(rule, 'ruleId'));
+          if (staleRulesToDelete.length > 0) {
+            const ruleIds = staleRulesToDelete.map(rule => getRuleField(rule, 'ruleId'));
             const deleteReq = new DeleteFirewallRulesRequest({
               instanceId: conf.instanceId,
               regionId: conf.regionId,
@@ -284,7 +292,7 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
             console.log('Deleting duplicate rules', deleteReq);
             const resp = await client.deleteFirewallRules(deleteReq);
             console.log('Delete response', resp.body);
-            for (const staleRule of staleRules) {
+            for (const staleRule of staleRulesToDelete) {
               const idx = rules.indexOf(staleRule);
               if (idx >= 0) rules.splice(idx, 1);
             }
