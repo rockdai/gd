@@ -59,12 +59,13 @@ exports.handler = (evt, ctx, cb) => {
           errors.push(...await handleSwasRuleConfig({ conf: CONF, ipMap, current, credential }));
         }
       } catch (ex) {
+        const message = getErrorMessage(ex);
         errors.push(buildRuleError({
           conf: CONF,
           ruleName: '*',
           protocol: '*',
           phase: 'config',
-          message: ex.message,
+          message,
         }));
       }
     }
@@ -121,7 +122,8 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
           targetRule.sourceCidrIp = sourceCidrIp;
           targetRule.description = description;
         } catch (ex) {
-          if (ex.message.includes('RuleDuplicate')) {
+          const message = getErrorMessage(ex);
+          if (message.includes('RuleDuplicate')) {
             console.log(`Security group ${protocol} rule already exists, skip`);
             continue;
           }
@@ -130,7 +132,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
             ruleName: ruleConf.name,
             protocol,
             phase: 'modify',
-            message: ex.message,
+            message,
           }));
           continue;
         }
@@ -157,7 +159,8 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
           portRange: PORT_RANGE,
         });
       } catch (ex) {
-        if (ex.message.includes('AuthorizationAlreadyExist') || ex.message.includes('RuleDuplicate')) {
+        const message = getErrorMessage(ex);
+        if (message.includes('AuthorizationAlreadyExist') || message.includes('RuleDuplicate')) {
           console.log(`Security group ${protocol} rule already exists, skip create`);
           continue;
         }
@@ -166,7 +169,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
           ruleName: ruleConf.name,
           protocol,
           phase: 'create',
-          message: ex.message,
+          message,
         }));
       }
     }
@@ -208,13 +211,17 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
         portField: 'port',
         remarkMatcher: value => isManagedDdnsRemark(value, ruleConf.name),
       });
-      const ruleToKeep = currentIpRule || targetRule;
+      const modifiableTargetRule = (targetRule && getRuleField(targetRule, 'ruleId')) ?
+        targetRule :
+        matchedRules.find(rule => getRuleField(rule, 'ruleId'));
+      const ruleToKeep = currentIpRule || modifiableTargetRule;
+      const ruleToModify = ruleToKeep && getRuleField(ruleToKeep, 'ruleId') ? ruleToKeep : null;
       const staleRules = matchedRules.filter(rule => rule !== ruleToKeep);
 
-      if (ruleToKeep) {
+      if (ruleToModify) {
         const rule = new ModifyFirewallRuleRequest({
           instanceId: conf.instanceId,
-          ruleId: getRuleField(ruleToKeep, 'ruleId'),
+          ruleId: getRuleField(ruleToModify, 'ruleId'),
           sourceCidrIp,
           remark,
           ruleProtocol: protocol,
@@ -224,10 +231,11 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
         try {
           const resp = await client.modifyFirewallRule(rule);
           console.log('Config response', resp.body);
-          ruleToKeep.sourceCidrIp = sourceCidrIp;
-          ruleToKeep.remark = remark;
+          ruleToModify.sourceCidrIp = sourceCidrIp;
+          ruleToModify.remark = remark;
         } catch (ex) {
-          if (ex.message.includes('FirewallRuleAlreadyExist')) {
+          const message = getErrorMessage(ex);
+          if (message.includes('FirewallRuleAlreadyExist')) {
             console.log(`Firewall ${protocol} rule already exists, skip`);
             continue;
           } else {
@@ -236,11 +244,13 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
               ruleName: ruleConf.name,
               protocol,
               phase: 'modify',
-              message: ex.message,
+              message,
             }));
             continue;
           }
         }
+      } else if (ruleToKeep) {
+        console.log(`Firewall ${protocol} rule already matches current IP but has no ruleId, skip modify`);
       } else {
         const createReq = new CreateFirewallRulesRequest({
           instanceId: conf.instanceId,
@@ -264,7 +274,8 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
             port: PORT_RANGE,
           });
         } catch (ex) {
-          if (ex.message.includes('FirewallRuleAlreadyExist')) {
+          const message = getErrorMessage(ex);
+          if (message.includes('FirewallRuleAlreadyExist')) {
             console.log(`Firewall ${protocol} rule already exists, skip create and cleanup duplicates if needed`);
           } else {
             errors.push(buildRuleError({
@@ -272,7 +283,7 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
               ruleName: ruleConf.name,
               protocol,
               phase: 'create',
-              message: ex.message,
+              message,
             }));
             continue;
           }
@@ -298,12 +309,13 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
             }
           }
         } catch (ex) {
+          const message = getErrorMessage(ex);
           errors.push(buildRuleError({
             conf,
             ruleName: ruleConf.name,
             protocol,
             phase: 'dedupe',
-            message: ex.message,
+            message,
           }));
         }
       }
@@ -335,6 +347,17 @@ async function listSwasRules(client, conf) {
 function buildRuleError({ conf, ruleName, protocol, phase, message }) {
   const identity = conf.groupId || conf.instanceId || '*';
   return `[${conf.product}/${conf.regionId}/${identity}] ${ruleName} ${protocol} ${phase} failed: ${message}`;
+}
+
+function getErrorMessage(ex) {
+  if (ex && ex.message !== undefined) return String(ex.message);
+  if (typeof ex === 'string') return ex;
+  try {
+    const json = JSON.stringify(ex);
+    return json === undefined ? String(ex) : json;
+  } catch (_) {
+    return String(ex);
+  }
 }
 
 async function fetchDns(domain) {
