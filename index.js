@@ -8,6 +8,7 @@ const {
   default: SWASClient,
   ModifyFirewallRuleRequest,
   CreateFirewallRulesRequest,
+  DeleteFirewallRulesRequest,
 } = require('@alicloud/swas-open20200601');
 
 const { DOMAIN, RuleConfig } = require('./config');
@@ -15,6 +16,7 @@ const {
   PORT_RANGE,
   RULE_PROTOCOLS,
   toSourceCidrIp,
+  normalizeIpForCompare,
   formatDateTime,
   getRuleField,
   buildManagedDdnsRemark,
@@ -57,12 +59,13 @@ exports.handler = (evt, ctx, cb) => {
           errors.push(...await handleSwasRuleConfig({ conf: CONF, ipMap, current, credential }));
         }
       } catch (ex) {
+        const message = getErrorMessage(ex);
         errors.push(buildRuleError({
           conf: CONF,
           ruleName: '*',
           protocol: '*',
           phase: 'config',
-          message: ex.message,
+          message,
         }));
       }
     }
@@ -119,7 +122,8 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
           targetRule.sourceCidrIp = sourceCidrIp;
           targetRule.description = description;
         } catch (ex) {
-          if (ex.message.includes('RuleDuplicate')) {
+          const message = getErrorMessage(ex);
+          if (message.includes('RuleDuplicate')) {
             console.log(`Security group ${protocol} rule already exists, skip`);
             continue;
           }
@@ -128,7 +132,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
             ruleName: ruleConf.name,
             protocol,
             phase: 'modify',
-            message: ex.message,
+            message,
           }));
           continue;
         }
@@ -155,7 +159,8 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
           portRange: PORT_RANGE,
         });
       } catch (ex) {
-        if (ex.message.includes('AuthorizationAlreadyExist') || ex.message.includes('RuleDuplicate')) {
+        const message = getErrorMessage(ex);
+        if (message.includes('AuthorizationAlreadyExist') || message.includes('RuleDuplicate')) {
           console.log(`Security group ${protocol} rule already exists, skip create`);
           continue;
         }
@@ -164,7 +169,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
           ruleName: ruleConf.name,
           protocol,
           phase: 'create',
-          message: ex.message,
+          message,
         }));
       }
     }
@@ -184,9 +189,18 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
 
   for (const ruleConf of conf.ruleList) {
     const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
+    const sourceCidrIpNorm = normalizeIpForCompare(sourceCidrIp);
     const remark = buildManagedDdnsRemark(ruleConf.name, current);
 
     for (const protocol of RULE_PROTOCOLS) {
+      const matchedRules = rules.filter(rule => (
+        String(getRuleField(rule, 'ruleProtocol') || '').toUpperCase() === protocol &&
+        getRuleField(rule, 'port') === PORT_RANGE &&
+        isManagedDdnsRemark(getRuleField(rule, 'remark') || '', ruleConf.name)
+      ));
+      const currentIpRule = matchedRules.find(rule => (
+        normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === sourceCidrIpNorm
+      ));
       const targetRule = findManagedRule({
         rules,
         ruleConf,
@@ -197,11 +211,17 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
         portField: 'port',
         remarkMatcher: value => isManagedDdnsRemark(value, ruleConf.name),
       });
+      const modifiableTargetRule = (targetRule && getRuleField(targetRule, 'ruleId')) ?
+        targetRule :
+        matchedRules.find(rule => getRuleField(rule, 'ruleId'));
+      const ruleToKeep = currentIpRule || modifiableTargetRule;
+      const ruleToModify = ruleToKeep && getRuleField(ruleToKeep, 'ruleId') ? ruleToKeep : null;
+      const staleRules = matchedRules.filter(rule => rule !== ruleToKeep);
 
-      if (targetRule) {
+      if (ruleToModify) {
         const rule = new ModifyFirewallRuleRequest({
           instanceId: conf.instanceId,
-          ruleId: getRuleField(targetRule, 'ruleId'),
+          ruleId: getRuleField(ruleToModify, 'ruleId'),
           sourceCidrIp,
           remark,
           ruleProtocol: protocol,
@@ -211,58 +231,93 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
         try {
           const resp = await client.modifyFirewallRule(rule);
           console.log('Config response', resp.body);
-          targetRule.sourceCidrIp = sourceCidrIp;
-          targetRule.remark = remark;
+          ruleToModify.sourceCidrIp = sourceCidrIp;
+          ruleToModify.remark = remark;
         } catch (ex) {
-          if (ex.message.includes('FirewallRuleAlreadyExist')) {
+          const message = getErrorMessage(ex);
+          if (message.includes('FirewallRuleAlreadyExist')) {
             console.log(`Firewall ${protocol} rule already exists, skip`);
             continue;
+          } else {
+            errors.push(buildRuleError({
+              conf,
+              ruleName: ruleConf.name,
+              protocol,
+              phase: 'modify',
+              message,
+            }));
+            continue;
           }
+        }
+      } else if (ruleToKeep) {
+        console.log(`Firewall ${protocol} rule already matches current IP but has no ruleId, skip modify`);
+      } else {
+        const createReq = new CreateFirewallRulesRequest({
+          instanceId: conf.instanceId,
+          regionId: conf.regionId,
+          firewallRules: [{
+            port: PORT_RANGE,
+            ruleProtocol: protocol,
+            sourceCidrIp,
+            remark,
+          }],
+        });
+        console.log('Rule to create', createReq);
+        try {
+          const resp = await client.createFirewallRules(createReq);
+          console.log('Create response', resp.body);
+          rules.push({
+            ruleId: resp?.body?.firewallRuleIds?.[0] || resp?.body?.FirewallRuleIds?.[0],
+            sourceCidrIp,
+            remark,
+            ruleProtocol: protocol,
+            port: PORT_RANGE,
+          });
+        } catch (ex) {
+          const message = getErrorMessage(ex);
+          if (message.includes('FirewallRuleAlreadyExist')) {
+            console.log(`Firewall ${protocol} rule already exists, skip create and cleanup duplicates if needed`);
+          } else {
+            errors.push(buildRuleError({
+              conf,
+              ruleName: ruleConf.name,
+              protocol,
+              phase: 'create',
+              message,
+            }));
+            continue;
+          }
+        }
+      }
+
+      if (staleRules.length > 0) {
+        try {
+          const staleRulesToDelete = staleRules.filter(rule => getRuleField(rule, 'ruleId'));
+          if (staleRulesToDelete.length > 0) {
+            const ruleIds = staleRulesToDelete.map(rule => getRuleField(rule, 'ruleId'));
+            const deleteReq = new DeleteFirewallRulesRequest({
+              instanceId: conf.instanceId,
+              regionId: conf.regionId,
+              ruleIds,
+            });
+            console.log('Deleting duplicate rules', deleteReq);
+            const resp = await client.deleteFirewallRules(deleteReq);
+            console.log('Delete response', resp.body);
+            for (const staleRule of staleRulesToDelete) {
+              const idx = rules.indexOf(staleRule);
+              if (idx >= 0) rules.splice(idx, 1);
+            }
+          }
+        } catch (ex) {
+          const message = getErrorMessage(ex);
           errors.push(buildRuleError({
             conf,
             ruleName: ruleConf.name,
             protocol,
-            phase: 'modify',
-            message: ex.message,
+            phase: 'dedupe',
+            message,
           }));
-          continue;
         }
-        continue;
-      }
-
-      const createReq = new CreateFirewallRulesRequest({
-        instanceId: conf.instanceId,
-        regionId: conf.regionId,
-        firewallRules: [{
-          port: PORT_RANGE,
-          ruleProtocol: protocol,
-          sourceCidrIp,
-          remark,
-        }],
-      });
-      console.log('Rule to create', createReq);
-      try {
-        const resp = await client.createFirewallRules(createReq);
-        console.log('Create response', resp.body);
-        rules.push({
-          ruleId: resp?.body?.firewallRuleIds?.[0] || resp?.body?.FirewallRuleIds?.[0],
-          sourceCidrIp,
-          remark,
-          ruleProtocol: protocol,
-          port: PORT_RANGE,
-        });
-      } catch (ex) {
-        if (ex.message.includes('FirewallRuleAlreadyExist')) {
-          console.log(`Firewall ${protocol} rule already exists, skip create`);
-          continue;
-        }
-        errors.push(buildRuleError({
-          conf,
-          ruleName: ruleConf.name,
-          protocol,
-          phase: 'create',
-          message: ex.message,
-        }));
       }
     }
   }
@@ -292,6 +347,17 @@ async function listSwasRules(client, conf) {
 function buildRuleError({ conf, ruleName, protocol, phase, message }) {
   const identity = conf.groupId || conf.instanceId || '*';
   return `[${conf.product}/${conf.regionId}/${identity}] ${ruleName} ${protocol} ${phase} failed: ${message}`;
+}
+
+function getErrorMessage(ex) {
+  if (ex && ex.message !== undefined) return String(ex.message);
+  if (typeof ex === 'string') return ex;
+  try {
+    const json = JSON.stringify(ex);
+    return json === undefined ? String(ex) : json;
+  } catch (_) {
+    return String(ex);
+  }
 }
 
 async function fetchDns(domain) {
