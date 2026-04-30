@@ -30,6 +30,24 @@ exports.RuleConfig = [{
     { name: DOMAIN.XFYJ_BK, id: 'ec66ce20a3af441082fa4cf1323d9d40' },
   ],
 }, {
+  // i-bp1hrakbpd2a3kmmrxb9
+  product: 'ecs',
+  groupId: 'sg-bp16x7uldelv1s1tqisl',
+  regionId: 'cn-hangzhou',
+  ruleList: [
+    { name: DOMAIN.XFYJ },
+    { name: DOMAIN.XFYJ_BK },
+  ],
+}, {
+  // i-6wefxjm4h7469tvpt8nb
+  product: 'ecs',
+  groupId: 'sg-6wee58xlpzqik1buhlzg',
+  regionId: 'ap-northeast-1',
+  ruleList: [
+    { name: DOMAIN.XFYJ },
+    { name: DOMAIN.XFYJ_BK },
+  ],
+}, {
   // a.keydiary.dev
   product: 'swas-open',
   instanceId: '0e86734f0efc44c38d510c56358bad5e',
