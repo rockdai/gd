@@ -22,7 +22,7 @@
 
 `ecs-dsec-handler`：获取当前设备公网 IP，为每台实例创建/维护防火墙规则。
 
-定时任务和 CLI 只会修改带系统托管 remark 的规则，不会认领或覆盖普通手工规则。
+定时任务只会修改/清理 `gd-ddns:` 开头的规则，Web 只会清理 `gd-web` 开头的过期规则，CLI 只会修改 `gd-cli:` 开头的规则；三者不会互相认领或删除规则。
 
 ## 快速开始
 
@@ -220,7 +220,7 @@ PASSKEY_CREDENTIALS_JSON='[]'
 
 - `DOMAIN`：需要解析的 DDNS 域名列表
 - `RuleConfig`：需要更新的规则列表
-- `RuleConfig[].ruleList[].id` / `ids`：仅用于定位已由本工具创建并托管的规则，不能填写手工维护规则的 ID
+- `RuleConfig[].ruleList[].id` / `ids`：仅用于定位已由定时任务创建、且 remark 以 `gd-ddns:` 开头的规则；`gd-web`、`gd-cli` 或手工维护规则即使 ID 填在这里也不会被定时任务认领
 
 ## 开发/协作约定
 

@@ -220,10 +220,10 @@ describe('scheduler rule ownership', () => {
     }
   });
 
-  it('continues to update legacy scheduler-managed rules and migrates their remark format', async () => {
+  it('does not modify legacy unprefixed scheduler rules even when their id is configured', async () => {
     const loaded = loadIndexWithMocks({
       swasRules: [ {
-        ruleId: 'legacy-managed-rule',
+        ruleId: 'legacy-unprefixed-rule',
         ruleProtocol: 'TCP',
         port: PORT_RANGE,
         remark: 'xfyj.keydiary.dev@2026-04-16 09:00:00',
@@ -237,7 +237,7 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'legacy-managed-rule' } ],
+          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'legacy-unprefixed-rule' } ],
         },
         ipMap: {
           'xfyj.keydiary.dev': '1.2.3.4',
@@ -248,11 +248,71 @@ describe('scheduler rule ownership', () => {
 
       assert.deepStrictEqual(errors, []);
       assert.strictEqual(loaded.swasClients.length, 1);
-      assert.strictEqual(loaded.swasClients[0].modifyCalls.length, 1);
-      assert.strictEqual(loaded.swasClients[0].modifyCalls[0].ruleId, 'legacy-managed-rule');
-      assert.strictEqual(loaded.swasClients[0].modifyCalls[0].remark, 'gd-ddns:xfyj.keydiary.dev@2026-04-17 12:00:00');
+      assert.strictEqual(loaded.swasClients[0].modifyCalls.length, 0);
+      assert.strictEqual(loaded.swasClients[0].deleteCalls.length, 0);
+      assert.strictEqual(loaded.swasClients[0].createCalls.length, 2);
+      assert.deepStrictEqual(
+        loaded.swasClients[0].createCalls.map(req => req.firewallRules[0].ruleProtocol),
+        [ 'TCP', 'UDP' ]
+      );
+      assert(loaded.swasClients[0].createCalls.every(req => req.firewallRules[0].remark === 'gd-ddns:xfyj.keydiary.dev@2026-04-17 12:00:00'));
+    } finally {
+      loaded.cleanup();
+    }
+  });
+
+  it('never modifies or deletes gd-web SWAS rules while reconciling scheduler rules', async () => {
+    const loaded = loadIndexWithMocks({
+      swasRules: [
+        {
+          ruleId: 'web-tcp-rule',
+          ruleProtocol: 'TCP',
+          port: PORT_RANGE,
+          remark: 'gd-web@2026-04-16 09:00:00',
+          sourceCidrIp: '9.9.9.9/32',
+        },
+        {
+          ruleId: 'managed-tcp-1',
+          ruleProtocol: 'TCP',
+          port: PORT_RANGE,
+          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 10:00:00',
+          sourceCidrIp: '2.2.2.2/32',
+        },
+        {
+          ruleId: 'managed-tcp-2',
+          ruleProtocol: 'TCP',
+          port: PORT_RANGE,
+          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 11:00:00',
+          sourceCidrIp: '3.3.3.3/32',
+        },
+      ],
+    });
+
+    try {
+      const errors = await loaded.mod.__private__.handleSwasRuleConfig({
+        conf: {
+          product: 'swas-open',
+          regionId: 'cn-hangzhou',
+          instanceId: 'i-test',
+          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'web-tcp-rule' } ],
+        },
+        ipMap: {
+          'xfyj.keydiary.dev': '1.2.3.4',
+        },
+        current: '2026-04-17 12:00:00',
+        credential: {},
+      });
+
+      assert.deepStrictEqual(errors, []);
+      assert.strictEqual(loaded.swasClients.length, 1);
+      assert.deepStrictEqual(
+        loaded.swasClients[0].modifyCalls.map(req => req.ruleId),
+        [ 'managed-tcp-1' ]
+      );
       assert.strictEqual(loaded.swasClients[0].createCalls.length, 1);
       assert.strictEqual(loaded.swasClients[0].createCalls[0].firewallRules[0].ruleProtocol, 'UDP');
+      assert.strictEqual(loaded.swasClients[0].deleteCalls.length, 1);
+      assert.deepStrictEqual(loaded.swasClients[0].deleteCalls[0].ruleIds, [ 'managed-tcp-2' ]);
     } finally {
       loaded.cleanup();
     }
