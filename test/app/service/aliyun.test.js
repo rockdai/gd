@@ -5,7 +5,7 @@ const assert = require('assert');
 const AliyunService = require('../../../app/service/aliyun');
 const { PORT_RANGE } = require('../../../lib/firewall-rule');
 
-function loadAliyunServiceWithMocks({ ecsRules = [], swasRules = [] } = {}) {
+function loadAliyunServiceWithMocks({ ecsRules = [], swasRules = [], ecsListError = null, swasListError = null } = {}) {
   const servicePath = require.resolve('../../../app/service/aliyun');
   const ecsSdkPath = require.resolve('@alicloud/ecs20140526');
   const swasSdkPath = require.resolve('@alicloud/swas-open20200601');
@@ -37,6 +37,7 @@ function loadAliyunServiceWithMocks({ ecsRules = [], swasRules = [] } = {}) {
 
     async describeSecurityGroupAttribute(req) {
       this.listCalls.push(req);
+      if (ecsListError) throw ecsListError;
       return {
         body: {
           permissions: {
@@ -106,6 +107,7 @@ function loadAliyunServiceWithMocks({ ecsRules = [], swasRules = [] } = {}) {
     loaded: true,
     exports: {
       async listAllFirewallRules() {
+        if (swasListError) throw swasListError;
         return swasRules.map(rule => ({ ...rule }));
       },
     },
@@ -409,6 +411,50 @@ describe('AliyunService manual rule protection', () => {
 
       assert.deepStrictEqual(result, { deletedCount: 0 });
       assert.strictEqual(loaded.swasClients[0].deleteCalls.length, 0);
+    } finally {
+      loaded.cleanup();
+    }
+  });
+
+  it('fails closed when ECS rule listing throws to avoid bypassing manual rule protection', async () => {
+    const loaded = loadAliyunServiceWithMocks({
+      ecsListError: new Error('boom'),
+    });
+
+    try {
+      const { instance } = createServiceInstance(loaded.ServiceClass);
+      const result = await instance._addIpToEcs(
+        {},
+        { regionId: 'cn-hangzhou', securityGroupId: 'sg-test', instanceId: 'i-test' },
+        '1.2.3.4/32',
+        'gd-web@2026-04-17 12:00:00'
+      );
+
+      assert.strictEqual(result.status, 'error');
+      assert.match(result.message, /Failed to list ECS rules/);
+      assert.strictEqual(loaded.ecsClients[0].authorizeCalls.length, 0);
+    } finally {
+      loaded.cleanup();
+    }
+  });
+
+  it('fails closed when SWAS rule listing throws to avoid bypassing manual rule protection', async () => {
+    const loaded = loadAliyunServiceWithMocks({
+      swasListError: new Error('boom'),
+    });
+
+    try {
+      const { instance } = createServiceInstance(loaded.ServiceClass);
+      const result = await instance._addIpToSwas(
+        {},
+        { regionId: 'cn-hangzhou', instanceId: 'i-test' },
+        '1.2.3.4/32',
+        'gd-web@2026-04-17 12:00:00'
+      );
+
+      assert.strictEqual(result.status, 'error');
+      assert.match(result.message, /Failed to list SWAS rules/);
+      assert.strictEqual(loaded.swasClients[0].createCalls.length, 0);
     } finally {
       loaded.cleanup();
     }

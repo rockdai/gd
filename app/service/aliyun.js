@@ -4,7 +4,6 @@ const { Service } = require('egg');
 const {
   default: ECSClient,
   DescribeInstancesRequest,
-  DescribeSecurityGroupAttributeRequest,
   AuthorizeSecurityGroupRequest,
   RevokeSecurityGroupRequest,
 } = require('@alicloud/ecs20140526');
@@ -20,14 +19,14 @@ const {
   RULE_PROTOCOLS,
   GD_WEB_RULE_PREFIX,
   toSourceCidrIp,
-  normalizeIpForCompare,
-  normalizeProtocol,
   formatDateTime,
   getRuleField,
   isExpiredWebRule,
   isOurManagedRemark,
+  findRuleByProtocolPortSource,
 } = require('../../lib/firewall-rule');
 const { listAllFirewallRules } = require('../../lib/swas-firewall');
+const { listSecurityGroupRules } = require('../../lib/ecs-firewall');
 
 class AliyunService extends Service {
 
@@ -184,24 +183,30 @@ class AliyunService extends Service {
       endpoint: `ecs.${regionId}.aliyuncs.com`,
       ...credential,
     });
+
+    let existingRules;
+    try {
+      existingRules = await listSecurityGroupRules({ client, securityGroupId, regionId });
+    } catch (err) {
+      this.logger.error(`[aliyun] Failed to list ECS rules for pre-check on ${machine.instanceId}:`, err.message || err);
+      return {
+        status: 'error',
+        message: `Failed to list ECS rules: ${err.message || err}; refusing to add to keep manual rules safe`,
+      };
+    }
+
     const protocolResults = [];
     let hasSuccess = false;
     let hasFailure = false;
 
-    let existingRules = [];
-    try {
-      existingRules = await this._listEcsRules(client, securityGroupId, regionId);
-    } catch (err) {
-      this.logger.warn(`[aliyun] Failed to list ECS rules for pre-check on ${machine.instanceId}:`, err.message || err);
-    }
-    const sourceCidrIpNorm = normalizeIpForCompare(sourceCidrIp);
-
     for (const protocol of RULE_PROTOCOLS) {
-      const existing = existingRules.find(rule => (
-        normalizeProtocol(getRuleField(rule, 'ipProtocol')) === protocol &&
-        getRuleField(rule, 'portRange') === PORT_RANGE &&
-        normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === sourceCidrIpNorm
-      ));
+      const existing = findRuleByProtocolPortSource({
+        rules: existingRules,
+        protocol,
+        sourceCidrIp,
+        protocolField: 'ipProtocol',
+        portField: 'portRange',
+      });
 
       if (existing) {
         protocolResults.push(`${protocol}: already exists`);
@@ -236,17 +241,6 @@ class AliyunService extends Service {
     return this._buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure });
   }
 
-  async _listEcsRules(client, securityGroupId, regionId) {
-    const listReq = new DescribeSecurityGroupAttributeRequest({
-      regionId,
-      securityGroupId,
-      direction: 'ingress',
-      maxResults: 1000,
-    });
-    const listResp = await client.describeSecurityGroupAttribute(listReq);
-    return listResp?.body?.permissions?.permission || [];
-  }
-
   /**
    * Add IP to SWAS firewall
    *
@@ -262,24 +256,30 @@ class AliyunService extends Service {
       regionId,
       ...credential,
     });
+
+    let existingRules;
+    try {
+      existingRules = await listAllFirewallRules({ client, instanceId, regionId });
+    } catch (err) {
+      this.logger.error(`[aliyun] Failed to list SWAS rules for pre-check on ${instanceId}:`, err.message || err);
+      return {
+        status: 'error',
+        message: `Failed to list SWAS rules: ${err.message || err}; refusing to add to keep manual rules safe`,
+      };
+    }
+
     const protocolResults = [];
     let hasSuccess = false;
     let hasFailure = false;
 
-    let existingRules = [];
-    try {
-      existingRules = await listAllFirewallRules({ client, instanceId, regionId });
-    } catch (err) {
-      this.logger.warn(`[aliyun] Failed to list SWAS rules for pre-check on ${instanceId}:`, err.message || err);
-    }
-    const sourceCidrIpNorm = normalizeIpForCompare(sourceCidrIp);
-
     for (const protocol of RULE_PROTOCOLS) {
-      const existing = existingRules.find(rule => (
-        normalizeProtocol(getRuleField(rule, 'ruleProtocol')) === protocol &&
-        getRuleField(rule, 'port') === PORT_RANGE &&
-        normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === sourceCidrIpNorm
-      ));
+      const existing = findRuleByProtocolPortSource({
+        rules: existingRules,
+        protocol,
+        sourceCidrIp,
+        protocolField: 'ruleProtocol',
+        portField: 'port',
+      });
 
       if (existing) {
         protocolResults.push(`${protocol}: already exists`);
@@ -335,7 +335,7 @@ class AliyunService extends Service {
       ...credential,
     });
 
-    const rules = await this._listEcsRules(client, securityGroupId, regionId);
+    const rules = await listSecurityGroupRules({ client, securityGroupId, regionId });
     const staleRules = rules.filter(rule => {
       const remark = getRuleField(rule, 'description');
       if (!isOurManagedRemark(remark)) return false;

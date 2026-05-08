@@ -19,6 +19,7 @@ const {
   isExpiredWebRule,
   parseRuleTimestamp,
   findManagedRule,
+  findRuleByProtocolPortSource,
 } = require('../../lib/firewall-rule');
 
 describe('firewall-rule helpers', () => {
@@ -102,6 +103,38 @@ describe('firewall-rule helpers', () => {
     assert.strictEqual(isOurManagedRemark(''), false);
     assert.strictEqual(isOurManagedRemark(null), false);
     assert.strictEqual(isOurManagedRemark(undefined), false);
+  });
+
+  it('matches rules by protocol+port+normalized source via findRuleByProtocolPortSource', () => {
+    const rules = [
+      { ipProtocol: 'tcp', portRange: PORT_RANGE, sourceCidrIp: '1.2.3.4/32' },
+      { ipProtocol: 'TCP', portRange: '22/22', sourceCidrIp: '1.2.3.4/32' },
+      { ipProtocol: 'UDP', portRange: PORT_RANGE, sourceCidrIp: '1.2.3.4/32' },
+    ];
+
+    assert.strictEqual(findRuleByProtocolPortSource({
+      rules,
+      protocol: 'TCP',
+      sourceCidrIp: '1.2.3.4',
+      protocolField: 'ipProtocol',
+      portField: 'portRange',
+    }), rules[0]);
+
+    assert.strictEqual(findRuleByProtocolPortSource({
+      rules,
+      protocol: 'TCP',
+      sourceCidrIp: '1.2.3.4/32',
+      protocolField: 'ipProtocol',
+      portField: 'portRange',
+    }), rules[0]);
+
+    assert.strictEqual(findRuleByProtocolPortSource({
+      rules,
+      protocol: 'TCP',
+      sourceCidrIp: '5.5.5.5/32',
+      protocolField: 'ipProtocol',
+      portField: 'portRange',
+    }), undefined);
   });
 
   it('ignores configured ids that point to non-managed rules', () => {

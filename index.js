@@ -1,7 +1,6 @@
 const {
   default: ECSClient,
   ModifySecurityGroupRuleRequest,
-  DescribeSecurityGroupAttributeRequest,
   AuthorizeSecurityGroupRequest,
 } = require('@alicloud/ecs20140526');
 const {
@@ -17,15 +16,16 @@ const {
   RULE_PROTOCOLS,
   toSourceCidrIp,
   normalizeIpForCompare,
-  normalizeProtocol,
   formatDateTime,
   getRuleField,
   buildManagedDdnsRemark,
   isManagedDdnsRemark,
   isOurManagedRemark,
   findManagedRule,
+  findRuleByProtocolPortSource,
 } = require('./lib/firewall-rule');
 const { listAllFirewallRules } = require('./lib/swas-firewall');
+const { listSecurityGroupRules } = require('./lib/ecs-firewall');
 
 exports.handler = (evt, ctx, cb) => {
   (async () => {
@@ -87,12 +87,11 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
     endpoint: `ecs.${conf.regionId}.aliyuncs.com`,
     ...credential,
   });
-  const rules = await listEcsRules(client, conf);
+  const rules = await listSecurityGroupRules({ client, securityGroupId: conf.groupId, regionId: conf.regionId });
   const errors = [];
 
   for (const ruleConf of conf.ruleList) {
     const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
-    const sourceCidrIpNorm = normalizeIpForCompare(sourceCidrIp);
     const description = buildManagedDdnsRemark(ruleConf.name, current);
 
     for (const protocol of RULE_PROTOCOLS) {
@@ -147,11 +146,13 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
         continue;
       }
 
-      const overlapping = rules.find(rule => (
-        normalizeProtocol(getRuleField(rule, 'ipProtocol')) === protocol &&
-        getRuleField(rule, 'portRange') === PORT_RANGE &&
-        normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === sourceCidrIpNorm
-      ));
+      const overlapping = findRuleByProtocolPortSource({
+        rules,
+        protocol,
+        sourceCidrIp,
+        protocolField: 'ipProtocol',
+        portField: 'portRange',
+      });
       if (overlapping) {
         const overlapRemark = getRuleField(overlapping, 'description') || '';
         console.log(`[scheduler] ${protocol} rule for ${sourceCidrIp} already covered by existing rule (description="${overlapRemark}"), skip create`);
@@ -276,11 +277,13 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
       } else if (ruleToKeep) {
         console.log(`Firewall ${protocol} rule already matches current IP but has no ruleId, skip modify`);
       } else {
-        const overlapping = rules.find(rule => (
-          normalizeProtocol(getRuleField(rule, 'ruleProtocol')) === protocol &&
-          getRuleField(rule, 'port') === PORT_RANGE &&
-          normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === sourceCidrIpNorm
-        ));
+        const overlapping = findRuleByProtocolPortSource({
+          rules,
+          protocol,
+          sourceCidrIp,
+          protocolField: 'ruleProtocol',
+          portField: 'port',
+        });
         if (overlapping) {
           const overlapRemark = getRuleField(overlapping, 'remark') || '';
           console.log(`[scheduler] ${protocol} rule for ${sourceCidrIp} already covered by existing rule (remark="${overlapRemark}"), skip create`);
@@ -364,17 +367,6 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
   return errors;
 }
 
-async function listEcsRules(client, conf) {
-  const req = new DescribeSecurityGroupAttributeRequest({
-    regionId: conf.regionId,
-    securityGroupId: conf.groupId,
-    direction: 'ingress',
-    maxResults: 1000,
-  });
-  const resp = await client.describeSecurityGroupAttribute(req);
-  return resp?.body?.permissions?.permission || [];
-}
-
 async function listSwasRules(client, conf) {
   return await listAllFirewallRules({
     client,
@@ -414,7 +406,6 @@ async function fetchDns(domain) {
 exports.__private__ = {
   handleEcsRuleConfig,
   handleSwasRuleConfig,
-  listEcsRules,
   listSwasRules,
   buildRuleError,
   fetchDns,
