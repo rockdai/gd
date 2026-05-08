@@ -14,6 +14,7 @@ const {
   buildManagedCliRemark,
   isLegacyManagedCliRemark,
   isManagedCliRemark,
+  isOurManagedRemark,
   isRuleExpired,
   isExpiredWebRule,
   parseRuleTimestamp,
@@ -84,6 +85,23 @@ describe('firewall-rule helpers', () => {
       .map(rule => rule.id);
 
     assert.deepStrictEqual(expiredIds, [ 'stale-tcp', 'stale-udp' ]);
+  });
+
+  it('treats only timestamped gd-web/gd-ddns/gd-cli remarks as our managed rules', () => {
+    assert.strictEqual(isOurManagedRemark('gd-web@2026-04-17 12:00:00'), true);
+    assert.strictEqual(isOurManagedRemark('gd-ddns:xfyj.keydiary.dev@2026-04-17 12:00:00'), true);
+    assert.strictEqual(isOurManagedRemark('gd-cli:ecs-dsec-handler@2026-04-17 12:00:00'), true);
+
+    assert.strictEqual(isOurManagedRemark('云谷园区'), false);
+    assert.strictEqual(isOurManagedRemark('云谷园区@2020-01-01 12:00:00'), false);
+    assert.strictEqual(isOurManagedRemark('xfyj.keydiary.dev@2026-04-17 12:00:00'), false);
+    assert.strictEqual(isOurManagedRemark('ecs-dsec-handler@2026-04-17 12:00:00'), false);
+    assert.strictEqual(isOurManagedRemark('gd-web'), false);
+    assert.strictEqual(isOurManagedRemark('gd-web@invalid'), false);
+    assert.strictEqual(isOurManagedRemark('gd-webx@2026-04-17 12:00:00'), false);
+    assert.strictEqual(isOurManagedRemark(''), false);
+    assert.strictEqual(isOurManagedRemark(null), false);
+    assert.strictEqual(isOurManagedRemark(undefined), false);
   });
 
   it('ignores configured ids that point to non-managed rules', () => {

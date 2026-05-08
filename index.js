@@ -17,10 +17,12 @@ const {
   RULE_PROTOCOLS,
   toSourceCidrIp,
   normalizeIpForCompare,
+  normalizeProtocol,
   formatDateTime,
   getRuleField,
   buildManagedDdnsRemark,
   isManagedDdnsRemark,
+  isOurManagedRemark,
   findManagedRule,
 } = require('./lib/firewall-rule');
 const { listAllFirewallRules } = require('./lib/swas-firewall');
@@ -90,6 +92,7 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
 
   for (const ruleConf of conf.ruleList) {
     const sourceCidrIp = toSourceCidrIp(ipMap[ruleConf.name]);
+    const sourceCidrIpNorm = normalizeIpForCompare(sourceCidrIp);
     const description = buildManagedDdnsRemark(ruleConf.name, current);
 
     for (const protocol of RULE_PROTOCOLS) {
@@ -105,6 +108,11 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
       });
 
       if (targetRule) {
+        const targetRemark = getRuleField(targetRule, 'description') || '';
+        if (!isOurManagedRemark(targetRemark)) {
+          console.log(`[scheduler] refuse to modify ECS rule with non-managed description: ${targetRemark}`);
+          continue;
+        }
         const ruleId = getRuleField(targetRule, 'securityGroupRuleId');
         const rule = new ModifySecurityGroupRuleRequest({
           regionId: conf.regionId,
@@ -136,6 +144,17 @@ async function handleEcsRuleConfig({ conf, ipMap, current, credential }) {
           }));
           continue;
         }
+        continue;
+      }
+
+      const overlapping = rules.find(rule => (
+        normalizeProtocol(getRuleField(rule, 'ipProtocol')) === protocol &&
+        getRuleField(rule, 'portRange') === PORT_RANGE &&
+        normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === sourceCidrIpNorm
+      ));
+      if (overlapping) {
+        const overlapRemark = getRuleField(overlapping, 'description') || '';
+        console.log(`[scheduler] ${protocol} rule for ${sourceCidrIp} already covered by existing rule (description="${overlapRemark}"), skip create`);
         continue;
       }
 
@@ -219,6 +238,11 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
       const staleRules = matchedRules.filter(rule => rule !== ruleToKeep);
 
       if (ruleToModify) {
+        const ruleToModifyRemark = getRuleField(ruleToModify, 'remark') || '';
+        if (!isOurManagedRemark(ruleToModifyRemark)) {
+          console.log(`[scheduler] refuse to modify SWAS rule with non-managed remark: ${ruleToModifyRemark}`);
+          continue;
+        }
         const rule = new ModifyFirewallRuleRequest({
           instanceId: conf.instanceId,
           ruleId: getRuleField(ruleToModify, 'ruleId'),
@@ -252,47 +276,62 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
       } else if (ruleToKeep) {
         console.log(`Firewall ${protocol} rule already matches current IP but has no ruleId, skip modify`);
       } else {
-        const createReq = new CreateFirewallRulesRequest({
-          instanceId: conf.instanceId,
-          regionId: conf.regionId,
-          firewallRules: [{
-            port: PORT_RANGE,
-            ruleProtocol: protocol,
-            sourceCidrIp,
-            remark,
-          }],
-        });
-        console.log('Rule to create', createReq);
-        try {
-          const resp = await client.createFirewallRules(createReq);
-          console.log('Create response', resp.body);
-          rules.push({
-            ruleId: resp?.body?.firewallRuleIds?.[0] || resp?.body?.FirewallRuleIds?.[0],
-            sourceCidrIp,
-            remark,
-            ruleProtocol: protocol,
-            port: PORT_RANGE,
+        const overlapping = rules.find(rule => (
+          normalizeProtocol(getRuleField(rule, 'ruleProtocol')) === protocol &&
+          getRuleField(rule, 'port') === PORT_RANGE &&
+          normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === sourceCidrIpNorm
+        ));
+        if (overlapping) {
+          const overlapRemark = getRuleField(overlapping, 'remark') || '';
+          console.log(`[scheduler] ${protocol} rule for ${sourceCidrIp} already covered by existing rule (remark="${overlapRemark}"), skip create`);
+        } else {
+          const createReq = new CreateFirewallRulesRequest({
+            instanceId: conf.instanceId,
+            regionId: conf.regionId,
+            firewallRules: [{
+              port: PORT_RANGE,
+              ruleProtocol: protocol,
+              sourceCidrIp,
+              remark,
+            }],
           });
-        } catch (ex) {
-          const message = getErrorMessage(ex);
-          if (message.includes('FirewallRuleAlreadyExist')) {
-            console.log(`Firewall ${protocol} rule already exists, skip create and cleanup duplicates if needed`);
-          } else {
-            errors.push(buildRuleError({
-              conf,
-              ruleName: ruleConf.name,
-              protocol,
-              phase: 'create',
-              message,
-            }));
-            continue;
+          console.log('Rule to create', createReq);
+          try {
+            const resp = await client.createFirewallRules(createReq);
+            console.log('Create response', resp.body);
+            rules.push({
+              ruleId: resp?.body?.firewallRuleIds?.[0] || resp?.body?.FirewallRuleIds?.[0],
+              sourceCidrIp,
+              remark,
+              ruleProtocol: protocol,
+              port: PORT_RANGE,
+            });
+          } catch (ex) {
+            const message = getErrorMessage(ex);
+            if (message.includes('FirewallRuleAlreadyExist')) {
+              console.log(`Firewall ${protocol} rule already exists, skip create and cleanup duplicates if needed`);
+            } else {
+              errors.push(buildRuleError({
+                conf,
+                ruleName: ruleConf.name,
+                protocol,
+                phase: 'create',
+                message,
+              }));
+              continue;
+            }
           }
         }
       }
 
       if (staleRules.length > 0) {
         try {
-          const staleRulesToDelete = staleRules.filter(rule => getRuleField(rule, 'ruleId'));
+          const safeStaleRules = staleRules.filter(rule => isOurManagedRemark(getRuleField(rule, 'remark') || ''));
+          if (safeStaleRules.length !== staleRules.length) {
+            const refused = staleRules.filter(rule => !isOurManagedRemark(getRuleField(rule, 'remark') || ''));
+            console.log(`[scheduler] refuse to delete ${refused.length} non-managed SWAS rule(s): ${refused.map(r => getRuleField(r, 'remark')).join(', ')}`);
+          }
+          const staleRulesToDelete = safeStaleRules.filter(rule => getRuleField(rule, 'ruleId'));
           if (staleRulesToDelete.length > 0) {
             const ruleIds = staleRulesToDelete.map(rule => getRuleField(rule, 'ruleId'));
             const deleteReq = new DeleteFirewallRulesRequest({
