@@ -576,6 +576,119 @@ describe('scheduler rule ownership', () => {
     }
   });
 
+  it('does not authorize ECS rule when a manual rule already covers the resolved IP', async () => {
+    const loaded = loadIndexWithMocks({
+      ecsRules: [ {
+        SecurityGroupRuleId: 'manual-ecs-rule',
+        IpProtocol: 'TCP',
+        PortRange: PORT_RANGE,
+        Description: '云谷园区',
+        SourceCidrIp: '1.2.3.4/32',
+      } ],
+    });
+
+    try {
+      const errors = await loaded.mod.__private__.handleEcsRuleConfig({
+        conf: {
+          product: 'ecs',
+          regionId: 'cn-hangzhou',
+          groupId: 'sg-test',
+          ruleList: [ { name: 'xfyj.keydiary.dev' } ],
+        },
+        ipMap: {
+          'xfyj.keydiary.dev': '1.2.3.4',
+        },
+        current: '2026-04-17 12:00:00',
+        credential: {},
+      });
+
+      assert.deepStrictEqual(errors, []);
+      assert.strictEqual(loaded.ecsClients[0].modifyCalls.length, 0);
+      assert.strictEqual(loaded.ecsClients[0].authorizeCalls.length, 1);
+      assert.strictEqual(loaded.ecsClients[0].authorizeCalls[0].ipProtocol, 'UDP');
+    } finally {
+      loaded.cleanup();
+    }
+  });
+
+  it('does not create SWAS rule when a manual rule already covers the resolved IP', async () => {
+    const loaded = loadIndexWithMocks({
+      swasRules: [ {
+        ruleId: 'manual-swas-rule',
+        ruleProtocol: 'TCP',
+        port: PORT_RANGE,
+        remark: '云谷园区',
+        sourceCidrIp: '1.2.3.4/32',
+      } ],
+    });
+
+    try {
+      const errors = await loaded.mod.__private__.handleSwasRuleConfig({
+        conf: {
+          product: 'swas-open',
+          regionId: 'cn-hangzhou',
+          instanceId: 'i-test',
+          ruleList: [ { name: 'xfyj.keydiary.dev' } ],
+        },
+        ipMap: {
+          'xfyj.keydiary.dev': '1.2.3.4',
+        },
+        current: '2026-04-17 12:00:00',
+        credential: {},
+      });
+
+      assert.deepStrictEqual(errors, []);
+      assert.strictEqual(loaded.swasClients[0].modifyCalls.length, 0);
+      assert.strictEqual(loaded.swasClients[0].deleteCalls.length, 0);
+      assert.strictEqual(loaded.swasClients[0].createCalls.length, 1);
+      assert.strictEqual(loaded.swasClients[0].createCalls[0].firewallRules[0].ruleProtocol, 'UDP');
+    } finally {
+      loaded.cleanup();
+    }
+  });
+
+  it('refuses to delete SWAS rules whose remarks do not look like our managed format', async () => {
+    const loaded = loadIndexWithMocks({
+      swasRules: [
+        {
+          ruleId: 'managed-tcp',
+          ruleProtocol: 'TCP',
+          port: PORT_RANGE,
+          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 09:00:00',
+          sourceCidrIp: '1.2.3.4/32',
+        },
+        {
+          ruleId: 'sneaky-manual',
+          ruleProtocol: 'TCP',
+          port: PORT_RANGE,
+          remark: '云谷园区',
+          sourceCidrIp: '5.5.5.5/32',
+        },
+      ],
+    });
+
+    try {
+      const errors = await loaded.mod.__private__.handleSwasRuleConfig({
+        conf: {
+          product: 'swas-open',
+          regionId: 'cn-hangzhou',
+          instanceId: 'i-test',
+          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'managed-tcp' } ],
+        },
+        ipMap: {
+          'xfyj.keydiary.dev': '1.2.3.4',
+        },
+        current: '2026-04-17 12:00:00',
+        credential: {},
+      });
+
+      assert.deepStrictEqual(errors, []);
+      assert.strictEqual(loaded.swasClients[0].deleteCalls.length, 0);
+    } finally {
+      loaded.cleanup();
+    }
+  });
+
   it('records non-Error SWAS modify failures without masking them', async () => {
     const loaded = loadIndexWithMocks({
       swasModifyError: { code: 'UnexpectedSdkFailure' },

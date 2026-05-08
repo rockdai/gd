@@ -4,7 +4,6 @@ const { Service } = require('egg');
 const {
   default: ECSClient,
   DescribeInstancesRequest,
-  DescribeSecurityGroupAttributeRequest,
   AuthorizeSecurityGroupRequest,
   RevokeSecurityGroupRequest,
 } = require('@alicloud/ecs20140526');
@@ -23,8 +22,11 @@ const {
   formatDateTime,
   getRuleField,
   isExpiredWebRule,
+  isOurManagedRemark,
+  findRuleByProtocolPortSource,
 } = require('../../lib/firewall-rule');
 const { listAllFirewallRules } = require('../../lib/swas-firewall');
+const { listSecurityGroupRules } = require('../../lib/ecs-firewall');
 
 class AliyunService extends Service {
 
@@ -166,6 +168,10 @@ class AliyunService extends Service {
 
   /**
    * Add IP to ECS security group
+   *
+   * Pre-checks for existing rules covering the same protocol+port+source before
+   * calling AuthorizeSecurityGroup. This protects manually-maintained rules from
+   * being touched by any potential upsert behavior in the underlying API.
    */
   async _addIpToEcs(credential, machine, sourceCidrIp, description) {
     const { regionId, securityGroupId } = machine;
@@ -177,11 +183,37 @@ class AliyunService extends Service {
       endpoint: `ecs.${regionId}.aliyuncs.com`,
       ...credential,
     });
+
+    let existingRules;
+    try {
+      existingRules = await listSecurityGroupRules({ client, securityGroupId, regionId });
+    } catch (err) {
+      this.logger.error(`[aliyun] Failed to list ECS rules for pre-check on ${machine.instanceId}:`, err.message || err);
+      return {
+        status: 'error',
+        message: `Failed to list ECS rules: ${err.message || err}; refusing to add to keep manual rules safe`,
+      };
+    }
+
     const protocolResults = [];
     let hasSuccess = false;
     let hasFailure = false;
 
     for (const protocol of RULE_PROTOCOLS) {
+      const existing = findRuleByProtocolPortSource({
+        rules: existingRules,
+        protocol,
+        sourceCidrIp,
+        protocolField: 'ipProtocol',
+        portField: 'portRange',
+      });
+
+      if (existing) {
+        protocolResults.push(`${protocol}: already exists`);
+        hasSuccess = true;
+        continue;
+      }
+
       const req = new AuthorizeSecurityGroupRequest({
         regionId,
         securityGroupId,
@@ -196,7 +228,7 @@ class AliyunService extends Service {
         protocolResults.push(`${protocol}: added`);
         hasSuccess = true;
       } catch (err) {
-        if (err.message && err.message.includes('AuthorizationAlreadyExist')) {
+        if (err.message && (err.message.includes('AuthorizationAlreadyExist') || err.message.includes('RuleDuplicate'))) {
           protocolResults.push(`${protocol}: already exists`);
           hasSuccess = true;
           continue;
@@ -211,6 +243,10 @@ class AliyunService extends Service {
 
   /**
    * Add IP to SWAS firewall
+   *
+   * Pre-checks for existing rules covering the same protocol+port+source before
+   * calling CreateFirewallRules. This protects manually-maintained rules from
+   * being touched by any potential upsert behavior in the underlying API.
    */
   async _addIpToSwas(credential, machine, sourceCidrIp, description) {
     const { regionId, instanceId } = machine;
@@ -220,11 +256,37 @@ class AliyunService extends Service {
       regionId,
       ...credential,
     });
+
+    let existingRules;
+    try {
+      existingRules = await listAllFirewallRules({ client, instanceId, regionId });
+    } catch (err) {
+      this.logger.error(`[aliyun] Failed to list SWAS rules for pre-check on ${instanceId}:`, err.message || err);
+      return {
+        status: 'error',
+        message: `Failed to list SWAS rules: ${err.message || err}; refusing to add to keep manual rules safe`,
+      };
+    }
+
     const protocolResults = [];
     let hasSuccess = false;
     let hasFailure = false;
 
     for (const protocol of RULE_PROTOCOLS) {
+      const existing = findRuleByProtocolPortSource({
+        rules: existingRules,
+        protocol,
+        sourceCidrIp,
+        protocolField: 'ruleProtocol',
+        portField: 'port',
+      });
+
+      if (existing) {
+        protocolResults.push(`${protocol}: already exists`);
+        hasSuccess = true;
+        continue;
+      }
+
       const req = new CreateFirewallRulesRequest({
         instanceId,
         regionId,
@@ -273,24 +335,23 @@ class AliyunService extends Service {
       ...credential,
     });
 
-    const listReq = new DescribeSecurityGroupAttributeRequest({
-      regionId,
-      securityGroupId,
-      direction: 'ingress',
-      maxResults: 1000,
-    });
-    const listResp = await client.describeSecurityGroupAttribute(listReq);
-    const rules = listResp?.body?.permissions?.permission || [];
-    const staleRuleIds = rules
-      .filter(rule => isExpiredWebRule({
+    const rules = await listSecurityGroupRules({ client, securityGroupId, regionId });
+    const staleRules = rules.filter(rule => {
+      const remark = getRuleField(rule, 'description');
+      if (!isOurManagedRemark(remark)) return false;
+      return isExpiredWebRule({
         protocol: getRuleField(rule, 'ipProtocol'),
         port: getRuleField(rule, 'portRange'),
-        remark: getRuleField(rule, 'description'),
-      }))
+        remark,
+      });
+    });
+    const staleRuleIds = staleRules
       .map(rule => getRuleField(rule, 'securityGroupRuleId'))
       .filter(Boolean);
 
     if (staleRuleIds.length === 0) return { deletedCount: 0 };
+
+    this.logger.info(`[aliyun] Cleaning up ${staleRuleIds.length} expired ECS rule(s) for ${machine.instanceId || securityGroupId}: ${staleRules.map(r => getRuleField(r, 'description')).join(', ')}`);
 
     const deleteReq = new RevokeSecurityGroupRequest({
       regionId,
@@ -314,16 +375,22 @@ class AliyunService extends Service {
       instanceId,
       regionId,
     });
-    const staleRuleIds = rules
-      .filter(rule => isExpiredWebRule({
+    const staleRules = rules.filter(rule => {
+      const remark = getRuleField(rule, 'remark');
+      if (!isOurManagedRemark(remark)) return false;
+      return isExpiredWebRule({
         protocol: getRuleField(rule, 'ruleProtocol'),
         port: getRuleField(rule, 'port'),
-        remark: getRuleField(rule, 'remark'),
-      }))
+        remark,
+      });
+    });
+    const staleRuleIds = staleRules
       .map(rule => getRuleField(rule, 'ruleId'))
       .filter(Boolean);
 
     if (staleRuleIds.length === 0) return { deletedCount: 0 };
+
+    this.logger.info(`[aliyun] Cleaning up ${staleRuleIds.length} expired SWAS rule(s) for ${instanceId}: ${staleRules.map(r => getRuleField(r, 'remark')).join(', ')}`);
 
     const deleteReq = new DeleteFirewallRulesRequest({
       instanceId,
