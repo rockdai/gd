@@ -329,9 +329,16 @@ async function handleSwasRuleConfig({ conf, ipMap, current, credential }) {
 
       if (staleRules.length > 0) {
         try {
-          const safeStaleRules = staleRules.filter(rule => isOurManagedRemark(getRuleField(rule, 'remark') || ''));
-          if (safeStaleRules.length !== staleRules.length) {
-            const refused = staleRules.filter(rule => !isOurManagedRemark(getRuleField(rule, 'remark') || ''));
+          const safeStaleRules = [];
+          const refused = [];
+          for (const rule of staleRules) {
+            if (isOurManagedRemark(getRuleField(rule, 'remark') || '')) {
+              safeStaleRules.push(rule);
+            } else {
+              refused.push(rule);
+            }
+          }
+          if (refused.length > 0) {
             console.log(`[scheduler] refuse to delete ${refused.length} non-managed SWAS rule(s): ${refused.map(r => getRuleField(r, 'remark')).join(', ')}`);
           }
           const staleRulesToDelete = safeStaleRules.filter(rule => getRuleField(rule, 'ruleId'));
