@@ -21,4 +21,8 @@ module.exports = app => {
   router.get('/api/machines', controller.api.machines);
   router.get('/api/ip-location', controller.api.ipLocation);
   router.post('/api/whitelist', controller.api.addWhitelist);
+
+  // OpenAPI routes (header-based PASSWORD auth, not JWT)
+  const passwordAuth = app.middleware.passwordAuth({}, app);
+  router.post('/openapi/whitelist', passwordAuth, controller.openapi.addWhitelist);
 };

@@ -108,6 +108,16 @@ Web 端默认使用密码登录：
 
 在此基础上，你还可以额外启用 Face ID / Passkey。它是附加登录方式，不会替代或关闭默认密码登录。
 
+### OpenAPI 鉴权
+
+`/openapi/*` 路由用 `Authorization: Bearer <PASSWORD>` 直接鉴权，不走 JWT。同 IP 1 分钟内 5 次错误密码会被限流到 429。示例：
+
+```bash
+curl -X POST https://gd.rockdai.com/openapi/whitelist \
+  -H "Authorization: Bearer $PASSWORD" \
+  -d ip=1.2.3.4 -d product=swas-open -d instanceId=i-xxx -d regionId=cn-hangzhou
+```
+
 ### Face ID / Passkey
 
 Passkey 采用**单用户 allowlist** 模型：
@@ -185,6 +195,7 @@ PASSKEY_CREDENTIALS_JSON='[]'
 | POST | `/api/passkey/register/verify` | 在已登录态下验证绑定并返回新的 allowlist JSON |
 | GET | `/api/machines` | 获取用户所有机器列表（ECS + 轻量服务器） |
 | POST | `/api/whitelist` | 添加 IP 到指定机器白名单 |
+| POST | `/openapi/whitelist` | 创建一条白名单规则（OpenAPI，header 鉴权，单机器） |
 
 > 公网 IP 获取由前端直接调用 `https://get-ip.rockdai.com`，确保拿到客户端的真实 IP。
 
