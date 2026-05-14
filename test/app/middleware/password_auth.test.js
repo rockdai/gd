@@ -33,9 +33,7 @@ function buildMiddleware() {
 describe('passwordAuth middleware', () => {
   beforeEach(() => {
     process.env.PASSWORD = 'correct-horse';
-    if (passwordAuth.__test_only__) {
-      passwordAuth.__test_only__.failedAttempts.clear();
-    }
+    passwordAuth.__test_only__.failedAttempts.clear();
   });
 
   afterEach(() => {
@@ -105,6 +103,21 @@ describe('passwordAuth middleware', () => {
     await middleware(ctx, async () => { nextCalled = true; });
     assert.strictEqual(ctx.status, 429);
     assert.strictEqual(nextCalled, false);
+  });
+
+  it('does not rate-limit after repeated missing/malformed headers', async () => {
+    const middleware = buildMiddleware();
+    for (let i = 0; i < 6; i++) {
+      const ctx = createCtx(); // missing header every time
+      await middleware(ctx, async () => {});
+      assert.strictEqual(ctx.status, 401);
+    }
+    // Correct password must still work — IP was never locked out
+    const ctx = createCtx({ token: 'correct-horse' });
+    let nextCalled = false;
+    await middleware(ctx, async () => { nextCalled = true; });
+    assert.strictEqual(ctx.status, 200);
+    assert.strictEqual(nextCalled, true);
   });
 
   it('returns 500 when PASSWORD env var is not set', async () => {
