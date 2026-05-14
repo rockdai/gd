@@ -23,15 +23,17 @@ function createCtx({ body = {}, addIpToWhitelist = async () => [] } = {}) {
 }
 
 describe('controller/openapi addWhitelist', () => {
+  const VALID_SWAS_BODY = Object.freeze({
+    ip: '1.2.3.4',
+    product: 'swas-open',
+    instanceId: 'i-test',
+    regionId: 'cn-hangzhou',
+  });
+
   it('returns 200 with the flattened machine result on success', async () => {
     const calls = [];
     const ctx = createCtx({
-      body: {
-        ip: '1.2.3.4',
-        product: 'swas-open',
-        instanceId: 'i-test',
-        regionId: 'cn-hangzhou',
-      },
+      body: { ...VALID_SWAS_BODY },
       addIpToWhitelist: async (ip, machines) => {
         calls.push({ ip, machines });
         return [{
@@ -140,12 +142,7 @@ describe('controller/openapi addWhitelist', () => {
 
   it('returns 502 when service result.status is "error"', async () => {
     const ctx = createCtx({
-      body: {
-        ip: '1.2.3.4',
-        product: 'swas-open',
-        instanceId: 'i-test',
-        regionId: 'cn-hangzhou',
-      },
+      body: { ...VALID_SWAS_BODY },
       addIpToWhitelist: async () => [{
         status: 'error',
         message: 'Failed to list ECS rules: AccessDenied',
@@ -161,12 +158,7 @@ describe('controller/openapi addWhitelist', () => {
 
   it('returns 200 with status="partial" when service is partial', async () => {
     const ctx = createCtx({
-      body: {
-        ip: '1.2.3.4',
-        product: 'swas-open',
-        instanceId: 'i-test',
-        regionId: 'cn-hangzhou',
-      },
+      body: { ...VALID_SWAS_BODY },
       addIpToWhitelist: async () => [{
         status: 'partial',
         message: 'TCP: added, UDP: failed (...)',
@@ -181,12 +173,7 @@ describe('controller/openapi addWhitelist', () => {
 
   it('returns 500 when service throws', async () => {
     const ctx = createCtx({
-      body: {
-        ip: '1.2.3.4',
-        product: 'swas-open',
-        instanceId: 'i-test',
-        regionId: 'cn-hangzhou',
-      },
+      body: { ...VALID_SWAS_BODY },
       addIpToWhitelist: async () => { throw new Error('boom'); },
     });
     const ctrl = new OpenapiController(ctx);
@@ -198,17 +185,27 @@ describe('controller/openapi addWhitelist', () => {
 
   it('returns 502 when service returns an empty array', async () => {
     const ctx = createCtx({
-      body: {
-        ip: '1.2.3.4',
-        product: 'swas-open',
-        instanceId: 'i-test',
-        regionId: 'cn-hangzhou',
-      },
+      body: { ...VALID_SWAS_BODY },
       addIpToWhitelist: async () => [],
     });
     const ctrl = new OpenapiController(ctx);
     await ctrl.addWhitelist();
     assert.strictEqual(ctx.status, 502);
     assert.strictEqual(ctx.body.status, 'error');
+  });
+
+  it('returns "Unsupported product" (not "required") when product is numeric 0', async () => {
+    const ctx = createCtx({
+      body: {
+        ip: '1.2.3.4',
+        product: 0,
+        instanceId: 'i-test',
+        regionId: 'cn-hangzhou',
+      },
+    });
+    const ctrl = new OpenapiController(ctx);
+    await ctrl.addWhitelist();
+    assert.strictEqual(ctx.status, 400);
+    assert.match(ctx.body.message, /Unsupported product/);
   });
 });

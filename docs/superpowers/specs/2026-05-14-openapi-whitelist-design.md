@@ -43,7 +43,7 @@ Headers:
 | `401` | `{success:false, message}` | 缺 `Authorization` 头 / 不以 `Bearer ` 开头 / 密码不匹配 |
 | `429` | `{success:false, message}` | 同 IP 1 分钟内"密码错"次数 ≥ 5（仅在 token 实际传了但不匹配时累加；缺/格式错的 header 不计入） |
 | `500` | `{success:false, message}` | `PASSWORD` 未配置 / 控制器抛出未捕获异常 |
-| `502` | `{success:false, message}` | `addIpToWhitelist` 返回 `error`（上游阿里云调用失败 / 拉规则失败） |
+| `502` | `{success:false, status:"error", message, machine}` | `addIpToWhitelist` 返回 `error`（上游阿里云调用失败 / 拉规则失败） |
 
 成功响应示例：
 ```json

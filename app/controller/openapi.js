@@ -15,13 +15,12 @@ class OpenapiController extends Controller {
     const { ctx } = this;
     const body = ctx.request.body || {};
 
-    const ip = String(body.ip || '').trim();
-    const product = String(body.product || '').trim();
-    const instanceId = String(body.instanceId || '').trim();
-    const regionId = String(body.regionId || '').trim();
-    const securityGroupId = body.securityGroupId
-      ? String(body.securityGroupId).trim()
-      : '';
+    const toTrimmedString = value => (value != null ? String(value).trim() : '');
+    const ip = toTrimmedString(body.ip);
+    const product = toTrimmedString(body.product);
+    const instanceId = toTrimmedString(body.instanceId);
+    const regionId = toTrimmedString(body.regionId);
+    const securityGroupId = toTrimmedString(body.securityGroupId);
 
     if (!ip || !product || !instanceId || !regionId) {
       ctx.status = 400;
