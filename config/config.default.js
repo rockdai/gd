@@ -62,6 +62,7 @@ module.exports = appInfo => {
       '/api/passkey/auth/options',
       '/api/passkey/auth/verify',
       /^\/public\//,  // Static assets (JS, CSS, manifest, SW)
+      /^\/openapi\//, // OpenAPI uses its own passwordAuth middleware
     ],
   };
 
