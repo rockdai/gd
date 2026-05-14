@@ -49,7 +49,7 @@ function digest(value) {
   return crypto.createHmac('sha256', HMAC_SALT).update(value).digest();
 }
 
-module.exports = () => {
+module.exports = (_options, _app) => {
   return async function passwordAuth(ctx, next) {
     const configuredPassword = process.env.PASSWORD;
     if (!configuredPassword) {
