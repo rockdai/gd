@@ -15,7 +15,7 @@
 | 旧用法 | 必须仍然工作 |
 |---|---|
 | `npm run dev` / `npm run start` | Egg.js 起 web 服务 |
-| `s deploy --type code` | FC 上传后 `bootstrap.js` / `index.js` 作为 handler 仍生效（**FC 控制台 handler 配置不动**）|
+| `s deploy --type code` / `s deploy --function code` | FC 上传后 `bootstrap.js` / `index.js` 作为 handler 仍生效（**FC 控制台 handler 配置不动**）；workspace symlink 实体化在 `s.yaml` 的 `actions.pre-deploy` 钩子里自动完成，无需用户额外步骤（详见 §7.3）|
 | `node bin/ecs-dsec-handler.js` (README 范例) | 仍可执行 |
 | `node -e "require('./index').handler({},{},console.log)"` | 仍可执行（README 范例） |
 | `npx ecs-dsec-handler` | 仍可执行 |
@@ -39,7 +39,7 @@ gd/
 ├── index.js                  # shim → packages/scheduler
 ├── config.js                 # shim → @gd/shared/src/rule-config
 ├── bin/ecs-dsec-handler.js   # shim → packages/cli/bin/ecs-dsec-handler.js
-├── s.yaml                    # 不变
+├── s.yaml                    # 加 actions.pre-deploy 钩子调用 materialize 脚本（§7.3）
 ├── docs/                     # 不变
 ├── scripts/
 │   └── materialize-workspace-deps.sh   # 部署前把 node_modules/@gd/* symlink 实体化
@@ -123,9 +123,7 @@ gd/
     "dev":   "npm run dev   -w @gd/web",
     "start": "npm run start -w @gd/web",
     "test":  "npm test -ws --if-present",
-    "cov":   "npm run cov -ws --if-present",
-    "predeploy":              "bash scripts/materialize-workspace-deps.sh",
-    "deploy:fc:code":         "npm run predeploy && s deploy --function code --assume-yes"
+    "cov":   "npm run cov -ws --if-present"
   },
   "devDependencies": {
     "egg-bin": "^6.13.0"
@@ -133,9 +131,9 @@ gd/
 }
 ```
 
-注:
-- 顶层 `devDependencies` 留 `egg-bin` 是因为 npm workspaces hoist 后，`egg-bin` 在根 `node_modules/.bin/` 可见，各 workspace 的 `egg-bin test` 都能解析到。
-- `predeploy` 跑实体化脚本（详见 §7.3）；`deploy:fc:code` 是 README/CI 推荐入口，CI 工作流也调用这个组合，确保线上代码包不带断 symlink。
+注: 顶层 `devDependencies` 留 `egg-bin` 是因为 npm workspaces hoist 后，`egg-bin` 在根 `node_modules/.bin/` 可见，各 workspace 的 `egg-bin test` 都能解析到。
+
+**为什么没有 `deploy` 相关 npm script**: workspace symlink 实体化由 `s.yaml` 的 `actions.pre-deploy` 钩子接管（§7.3.4），任何 `s deploy ...` 调用形态都会自动触发，不需要在 npm 层包一遍。保留 README 里"`s deploy --function code --assume-yes`"作为唯一部署入口、与现状一致。
 
 ### 5.2 `packages/shared/package.json`
 
@@ -372,11 +370,13 @@ ecs-dsec:  { props: { code: ./ } }
 
 硬约束"`s deploy --function code` 后 FC handler 仍生效"不能依赖这些未验证假设。
 
-#### 7.3.2 设计决策：实体化 (materialize) workspace symlink
+#### 7.3.2 设计决策：实体化 (materialize) workspace symlink，由 `s.yaml` 钩子触发
 
-在 `s deploy` 前显式把 `node_modules/@gd/*` 的 symlink 替换为目标目录的**实体副本**。上传内容里就不再有 symlink，`require('@gd/shared')` 在 FC 上像普通 npm 包一样从 `node_modules/@gd/shared/` 实体目录解析。
+把 `node_modules/@gd/*` 的 symlink 显式替换为目标目录的**实体副本**。上传内容里就不再有 symlink，`require('@gd/shared')` 在 FC 上像普通 npm 包一样从 `node_modules/@gd/shared/` 实体目录解析。
 
-这是确定性方案：完全规避 `s` 打包细节、`tar`/`zip` 链接处理、Node.js symlink 跟随等所有未知行为。
+**集成点 = `s.yaml` 的 `actions.pre-deploy` 钩子**（详见 §7.3.4）：用户/CI 直接跑 `s deploy --type code` / `s deploy --function code --assume-yes` 即可，`s` CLI 自动在打包前执行实体化脚本。这样 §1 硬约束表里"`s deploy --type code` 必须仍然工作"是字面满足的——用户的命令行不需要任何改动。
+
+这是确定性方案：完全规避 `s` 打包对 symlink 的处理细节、`tar`/`zip` 链接节点编码、Node.js symlink 跟随等所有未知行为。
 
 #### 7.3.3 脚本: `scripts/materialize-workspace-deps.sh`
 
@@ -415,38 +415,67 @@ echo "[materialize] done, materialized $count workspace package(s)"
 
 **幂等性**: 二次运行时 `-L "$entry"` 为 false（已是实体目录），脚本跳过、计数 0。安全。
 
-#### 7.3.4 集成：CI workflow + npm script
+#### 7.3.4 集成：`s.yaml` 的 `actions.pre-deploy` 钩子
 
-`.github/workflows/fc-deploy.yaml` 现状：
+Serverless Devs v3（`edition: 3.0.0`）支持资源级 `actions.pre-deploy`，在 `s deploy` 打包/上传**之前**执行任意 shell 命令。把 materialize 挂在这里，任何形态的 `s deploy ...` 调用（CI、本地、`--type code`、`--function code`、`--function-name` 子集部署）都会先实体化，无需 wrapper。
+
+现状 `s.yaml`:
 ```yaml
-- run: npm install --production
-- ...
-- run: s deploy --function code --assume-yes
+edition: 3.0.0
+name: gd-whitelist
+access: "default"
+
+vars:
+  region: cn-hangzhou
+
+resources:
+  gd-web:
+    component: fc3
+    props: { region: ${vars.region}, functionName: gd-web, code: ./ }
+  ecs-dsec:
+    component: fc3
+    props: { region: ${vars.region}, functionName: ecs-dsec, code: ./ }
 ```
 
 改造为：
-```yaml
-- run: npm install --production
-- run: bash scripts/materialize-workspace-deps.sh
-- ...
-- run: s deploy --function code --assume-yes
-```
-
-或者更简洁，用 npm script 包装（已在 §5.1 加 `predeploy` + `deploy:fc:code`）：
 
 ```yaml
-- run: npm install --production
-- ...
-- run: npm run deploy:fc:code
+edition: 3.0.0
+name: gd-whitelist
+access: "default"
+
+vars:
+  region: cn-hangzhou
+
+resources:
+  gd-web:
+    component: fc3
+    actions:
+      pre-deploy:
+        - run: bash scripts/materialize-workspace-deps.sh
+          path: ./
+    props: { region: ${vars.region}, functionName: gd-web, code: ./ }
+  ecs-dsec:
+    component: fc3
+    actions:
+      pre-deploy:
+        - run: bash scripts/materialize-workspace-deps.sh
+          path: ./
+    props: { region: ${vars.region}, functionName: ecs-dsec, code: ./ }
 ```
 
-二选一，倾向后者——`predeploy` 是 npm 标准 hook，调用 `deploy:fc:code` 时自动跑实体化，避免 CI 顺序错排成"`s deploy` 在实体化之前"。
+要点：
 
-**本地 `s deploy`**: README 同步更新，提示用户走 `npm run deploy:fc:code` 而不是直接 `s deploy --type code`，或自己先跑一次 `bash scripts/materialize-workspace-deps.sh`。
+- **per-resource 重复声明**: Serverless Devs v3 的 `actions` 是资源级字段；同一个钩子要分别挂到 `gd-web` 与 `ecs-dsec` 下。`s deploy --function code` 一次部署两个函数时两条钩子都会跑——第二次因为脚本幂等（§7.3.3）count=0，零额外成本。
+- **`path: ./`**: 命令在仓库根执行，与 `scripts/materialize-workspace-deps.sh` 的根目录依赖一致。
+- **CI workflow 不变**: `.github/workflows/fc-deploy.yaml` 维持现有 `s deploy --function code --assume-yes`；钩子在 `s` CLI 内部接管。
+- **本地 README 不变**: README "部署到函数计算 FC" 一节展示的 `s deploy --type code` 维持原样，仅在文字里补一句"`s.yaml` 已包含 pre-deploy 钩子，会自动实体化 workspace 依赖，无需手动处理"。
+
+**为什么不在 npm 层另开 `deploy:fc:code` 脚本**: 多一条入口反而增加用户认知负担、且与硬约束"旧 `s deploy --type code` 必须工作"间产生分歧（用户走旧命令时容易绕过 wrapper）。`s.yaml` 钩子是单一真相源，任何 `s deploy` 调用都安全。
 
 #### 7.3.5 已知副作用与权衡
 
-- 实体化后 `node_modules/@gd/shared` 与 `packages/shared` 是两份独立副本——在 CI 上无所谓（容器即弃），但**本地开发者**若跑了 `npm run deploy:fc:code` 之后改 `packages/shared/src/...` 源码，运行时仍可能从 `node_modules/@gd/shared/src/...`（旧副本）解析，导致改动看不到生效。**对策**：README 注明"本地跑过 deploy 准备脚本后想恢复 link，重新 `npm install` 即可"——`npm install` 会重建 `node_modules/@gd/*` 为 symlink。
+- 实体化后 `node_modules/@gd/shared` 与 `packages/shared` 是两份独立副本——在 CI 上无所谓（容器即弃），但**本地开发者**若跑过一次 `s deploy`（触发 pre-deploy 钩子），之后修改 `packages/shared/src/...` 源码，运行时仍可能从 `node_modules/@gd/shared/src/...`（旧副本）解析，导致改动看不到生效。**对策**：README 注明"本地跑过 `s deploy` 后想恢复 symlink，重新 `npm install` 即可"——`npm install` 会重建 `node_modules/@gd/*` 为 symlink。
 - 实体化只在部署路径上跑；日常 `npm test` / `npm run dev` 走原始 symlink 路径，开发体验不变。
 
 ### 7.4 CLI 的 cwd 行为
@@ -513,8 +542,8 @@ echo "[materialize] done, materialized $count workspace package(s)"
 | V9 | 实体化脚本可独立跑 | `npm install && bash scripts/materialize-workspace-deps.sh`，再 `ls -l node_modules/@gd` 全部不是 symlink |
 | V10 | 实体化后 require 仍可解析 | 实体化后跑 `node -e "console.log(require('@gd/shared/src/firewall-rule').PORT_RANGE)"` 输出 `1/65535` |
 | V11 | 实体化幂等 | 连跑两次 `bash scripts/materialize-workspace-deps.sh`，第二次 "materialized 0 workspace package(s)" |
-| V12 | `npm run deploy:fc:code` 链路 | `npm install --production && npm run deploy:fc:code` 在 dry-run 或测试环境真实部署一次，FC 端启动无 `Cannot find module '@gd/shared'` |
-| V13 | 旧 README 命令示例仍可用 | 按 README 第 49-77 行命令逐条手测 |
+| V12 | `s.yaml` 钩子自动触发实体化 | 测试环境跑 `npm install --production && s deploy --function code --assume-yes`，FC 端启动无 `Cannot find module '@gd/shared'`；脚本输出中能看到 `[materialize] ... <= ...` 行 |
+| V13 | 旧 README 命令示例仍可用 | 按 README 第 49-77 行命令逐条手测（包含 `s deploy --type code` 直接调用） |
 
 ## 10. 实施步骤（高层次）
 
@@ -536,19 +565,19 @@ echo "[materialize] done, materialized $count workspace package(s)"
    - cli `bin/ecs-dsec-handler.js` 的 `../config` → `@gd/shared/src/rule-config`
 4. 改 `aliyun-conf.findRepoRoot` 识别 workspaces 根（§7.1）。
 5. 写根 shim：`index.js`、`config.js`、`bootstrap.js`、`bin/ecs-dsec-handler.js`（§6）。
-6. 更新根 `package.json`：workspaces、scripts（含 `predeploy`/`deploy:fc:code`）、devDependencies（§5.1）。
+6. 更新根 `package.json`：workspaces、scripts、devDependencies（§5.1）。
 7. 移动测试 + 调 require（§8.1）：
    - **scheduler 测试**: `test/index.test.js` → `packages/scheduler/test/index.test.js`，把 `require.resolve('../lib/swas-firewall')` 改成 `require.resolve('@gd/shared/src/swas-firewall')`，并给 `@gd/scheduler` 加 `scripts.test`（§5.4）。
    - 其它测试按 §8.1 映射移动 + 调 require。
 8. 新建 `scripts/materialize-workspace-deps.sh` 并 `chmod +x`（§7.3.3）。
-9. 改造 `.github/workflows/fc-deploy.yaml`：把 `s deploy --function code --assume-yes` 替换为 `npm run deploy:fc:code`（§7.3.4）。
+9. 改造 `s.yaml`：给 `gd-web` 和 `ecs-dsec` 两个 resource 各加 `actions.pre-deploy` 钩子调用实体化脚本（§7.3.4）。CI workflow `.github/workflows/fc-deploy.yaml` 不需要改动。
 10. `npm install` → `npm test` 全绿。
 11. 执行 §9 V1–V13 全清单验证；特别是 V12 在测试环境实跑一次 FC 部署。
 12. 更新 README "项目结构" / "快速开始" / "本地开发" / "部署" 章节，加：
     - monorepo 概述 + 包列表
     - passkey counter 路径迁移 note
-    - 本地 `s deploy` 改用 `npm run deploy:fc:code`
-    - 实体化对本地开发的副作用（运行后想恢复 symlink 重新 `npm install`）
+    - 部署命令不变（`s deploy --type code` / `s deploy --function code`），但 `s.yaml` 已挂 pre-deploy 钩子自动实体化 workspace 依赖
+    - 实体化对本地开发的副作用（运行 `s deploy` 后 `node_modules/@gd/*` 从 symlink 变成实体副本，源码改动不再实时可见；想恢复重新 `npm install` 即可）
 
 ## 11. 不在本次范围
 
@@ -560,7 +589,8 @@ echo "[materialize] done, materialized $count workspace package(s)"
 
 ## 12. 验收标准
 
-- §9 V1–V8 全 ✅。
+- §9 V1–V13 全 ✅（包含 RuleConfig 加载、scheduler 测试运行、实体化脚本、`s.yaml` 钩子真实部署）。
 - 没有任何源码（除 shim 外）继续从根目录的 `lib/` 或 `app/` require。
 - `git mv` 保留 history（rename detection 触发）。
 - README 与文档反映新结构。
+- `s.yaml` 含 `actions.pre-deploy` 钩子，直接 `s deploy --type code` 也能跑通。
