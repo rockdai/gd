@@ -52,6 +52,10 @@ npm run dev
 # 访问 http://127.0.0.1:7001
 ```
 
+> 这是 npm workspaces monorepo：`npm i` 会安装所有 `packages/*` 的依赖并把它们建成 `node_modules/@gd/*` 的 symlink。
+> `npm run dev` / `npm run start` / `npm test` 在根目录均可直接用——根 `package.json` 把它们转发到对应 workspace。
+> 若只跑某一包的测试：`npm test -w @gd/shared`、`npm test -w @gd/web`、`npm test -w @gd/scheduler`。
+
 > 生产域名固定为 `https://gd.rockdai.com`，Passkey 默认也按这个域名配置。`http://127.0.0.1:7001` 只适合普通密码登录开发，不适合直接做 Passkey 真机联调。
 
 ### 命令行工具
@@ -97,6 +101,9 @@ npm install -g @serverless-devs/s
 s deploy --type code
 ```
 
+> `s.yaml` 已包含 `actions.pre-deploy` 钩子，会在打包前自动跑 `scripts/materialize-workspace-deps.sh`——把 `node_modules/@gd/*` 的 workspace symlink 替换为实体副本，确保 FC 端 require `@gd/shared` 正常解析。
+> **本地副作用提醒**：跑过 `s deploy` 后 `node_modules/@gd/*` 会从 symlink 变成静态副本；想恢复 symlink（让本地源码修改实时可见）重新跑一次 `npm install` 即可。
+
 环境变量需在 FC 控制台配置 `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET`。
 
 ## 认证方式
@@ -140,7 +147,7 @@ Passkey 采用**单用户 allowlist** 模型：
 - `PASSKEY_ENROLLMENT_ENABLED`：是否允许已登录用户继续绑定新设备，默认 `true`
 - `PASSKEY_CHALLENGE_TTL_SEC`：passkey 挑战票据有效期，默认 `300`
 - `PASSKEY_FLOW_TOKEN_SECRET`：passkey challenge token 专用签名密钥；默认由 `JWT_SECRET` 派生
-- `PASSKEY_COUNTERS_FILE`：服务端持久化 passkey counter 的文件路径，默认 `run/passkey-counters.json`
+- `PASSKEY_COUNTERS_FILE`：服务端持久化 passkey counter 的文件路径，默认 `packages/web/run/passkey-counters.json`（旧版默认是 `run/passkey-counters.json`，monorepo 化后 `appInfo.baseDir` 变成 `packages/web/`——本地有遗留计数器文件可以手工 mv 或显式设环境变量）
 
 示例：
 
@@ -155,31 +162,34 @@ PASSKEY_CREDENTIALS_JSON='[]'
 ## 项目结构
 
 ```
-├── app/                    # Egg.js 应用
-│   ├── controller/         # 控制器
-│   │   ├── home.js         # 首页（PWA 入口）
-│   │   └── api.js          # API 接口
-│   ├── service/            # 服务层
-│   │   └── aliyun.js       # 阿里云 SDK 服务
-│   ├── public/             # 静态资源
-│   │   ├── index.html      # PWA 页面
-│   │   ├── manifest.json   # PWA manifest
-│   │   └── sw.js           # Service Worker
-│   └── router.js           # 路由定义
-├── config/                 # Egg.js 配置
-│   ├── config.default.js   # 默认配置（含 AK/SK、regions）
-│   └── plugin.js           # 插件配置
-├── lib/                    # 公共库
-│   ├── aliyun-conf.js      # AK/SK 读取
-│   ├── handler-swas-open.js # 轻量服务器处理
-│   └── public-ip.js        # 公网 IP 获取
-├── bin/                    # 命令行工具
-│   └── ecs-dsec-handler.js
-├── index.js                # FC 定时任务 handler
-├── config.js               # 定时任务规则配置
-├── bootstrap.js            # FC 自定义运行时启动入口
-├── s.yaml                  # Serverless Devs 部署配置
-└── package.json
+├── package.json            # npm workspaces 入口；scripts 转发到子 package
+├── bootstrap.js            # 根 shim → packages/web/bootstrap（FC web handler）
+├── index.js                # 根 shim → packages/scheduler（FC ecs-dsec handler）
+├── config.js               # 根 shim → @gd/shared/src/rule-config（兜底外部 require）
+├── bin/ecs-dsec-handler.js # 根 shim → packages/cli/bin/...
+├── s.yaml                  # Serverless Devs 部署配置；含 pre-deploy 钩子
+├── scripts/
+│   └── materialize-workspace-deps.sh  # 部署前把 workspace symlink 实体化
+├── packages/
+│   ├── shared/             # @gd/shared —— 跨 package 共用纯函数
+│   │   ├── src/
+│   │   │   ├── firewall-rule.js, swas-firewall.js, ecs-firewall.js
+│   │   │   ├── ip.js, aliyun-conf.js, public-ip.js
+│   │   │   ├── handler-swas-open.js
+│   │   │   └── rule-config.js          # 原根 config.js（DOMAIN + RuleConfig）
+│   │   └── test/
+│   ├── web/                # @gd/web —— Egg.js PWA + OpenAPI
+│   │   ├── app/{controller,middleware,service,public}/, router.js
+│   │   ├── config/         # Egg.js 配置（含 passkey、jwt、aliyun、amap）
+│   │   ├── bootstrap.js    # Egg.js 启动入口
+│   │   ├── lib/            # web 私有：access-token、passkey、passkey-counter-store
+│   │   └── test/
+│   ├── scheduler/          # @gd/scheduler —— FC 定时任务
+│   │   ├── index.js
+│   │   └── test/index.test.js
+│   └── cli/                # @gd/cli —— ecs-dsec-handler 命令行
+│       └── bin/ecs-dsec-handler.js
+└── docs/                   # 设计文档（含 spec / plan）
 ```
 
 ## API
