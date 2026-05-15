@@ -37,10 +37,12 @@ gd/
 ├── package.json              # workspaces: ["packages/*"]，根 scripts + bin shim
 ├── bootstrap.js              # shim → packages/web/bootstrap
 ├── index.js                  # shim → packages/scheduler
-├── config.js                 # shim → packages/scheduler/config
+├── config.js                 # shim → @gd/shared/src/rule-config
 ├── bin/ecs-dsec-handler.js   # shim → packages/cli/bin/ecs-dsec-handler.js
 ├── s.yaml                    # 不变
 ├── docs/                     # 不变
+├── scripts/
+│   └── materialize-workspace-deps.sh   # 部署前把 node_modules/@gd/* symlink 实体化
 ├── packages/
 │   ├── shared/               # @gd/shared
 │   │   ├── package.json
@@ -52,7 +54,8 @@ gd/
 │   │   │   ├── ip.js
 │   │   │   ├── aliyun-conf.js
 │   │   │   ├── public-ip.js
-│   │   │   └── handler-swas-open.js
+│   │   │   ├── handler-swas-open.js
+│   │   │   └── rule-config.js        # 原根 config.js（DOMAIN + RuleConfig）
 │   │   └── test/
 │   │       ├── firewall-rule.test.js
 │   │       ├── swas-firewall.test.js
@@ -67,7 +70,6 @@ gd/
 │   │   │   ├── passkey.js
 │   │   │   └── passkey-counter-store.js
 │   │   └── test/
-│   │       ├── index.test.js
 │   │       ├── app/controller/openapi.test.js
 │   │       ├── app/middleware/{jwt_auth,password_auth}.test.js
 │   │       ├── app/service/aliyun.test.js
@@ -75,14 +77,15 @@ gd/
 │   ├── scheduler/            # @gd/scheduler
 │   │   ├── package.json
 │   │   ├── index.js
-│   │   └── config.js
+│   │   └── test/
+│   │       └── index.test.js         # 原根 test/index.test.js（"scheduler rule ownership"）
 │   └── cli/                  # @gd/cli
 │       ├── package.json
 │       └── bin/ecs-dsec-handler.js
 └── (其他根级文件: .aliyun.conf.example, .gitignore 等保持不动)
 ```
 
-## 4. lib/ 拆分映射
+## 4. 源码拆分映射
 
 按"谁 require"判定归属：
 
@@ -98,8 +101,11 @@ gd/
 | `lib/access-token.js` | `packages/web/lib/access-token.js` | 仅 web |
 | `lib/passkey.js` | `packages/web/lib/passkey.js` | 仅 web |
 | `lib/passkey-counter-store.js` | `packages/web/lib/passkey-counter-store.js` | 仅 web |
+| `config.js` | `packages/shared/src/rule-config.js` | scheduler + cli |
 
 说明: `ip`、`aliyun-conf` 当前只有 web/cli 用，但跨包性质决定它们更适合放 `shared`，避免 web 把 cli 隐式拉进依赖图。`public-ip`、`handler-swas-open` 同理：当前只 cli 用，但作为"对外服务的纯逻辑封装"放 `shared` 更稳，未来 scheduler 或 web 想复用就直接 require。
+
+**`config.js` 归属**: 该文件导出的 `DOMAIN`/`RuleConfig` 是 DDNS 域名→白名单规则的**部署配置数据**，scheduler（FC 定时函数）与 cli（`ecs-dsec-handler`）都把它当 input 读。两者是平级消费者，没有谁是谁的子集，因此放进 `shared` 而不是让 cli 依赖 scheduler。命名改为 `rule-config.js`，避免与 Egg 的 `config/` 概念混淆。
 
 ## 5. 包 manifest
 
@@ -117,7 +123,9 @@ gd/
     "dev":   "npm run dev   -w @gd/web",
     "start": "npm run start -w @gd/web",
     "test":  "npm test -ws --if-present",
-    "cov":   "npm run cov -ws --if-present"
+    "cov":   "npm run cov -ws --if-present",
+    "predeploy":              "bash scripts/materialize-workspace-deps.sh",
+    "deploy:fc:code":         "npm run predeploy && s deploy --function code --assume-yes"
   },
   "devDependencies": {
     "egg-bin": "^6.13.0"
@@ -125,7 +133,9 @@ gd/
 }
 ```
 
-注: 顶层 `devDependencies` 留 `egg-bin` 是因为 npm workspaces hoist 后，`egg-bin` 在根 `node_modules/.bin/` 可见，各 workspace 的 `egg-bin test` 都能解析到。
+注:
+- 顶层 `devDependencies` 留 `egg-bin` 是因为 npm workspaces hoist 后，`egg-bin` 在根 `node_modules/.bin/` 可见，各 workspace 的 `egg-bin test` 都能解析到。
+- `predeploy` 跑实体化脚本（详见 §7.3）；`deploy:fc:code` 是 README/CI 推荐入口，CI 工作流也调用这个组合，确保线上代码包不带断 symlink。
 
 ### 5.2 `packages/shared/package.json`
 
@@ -195,6 +205,9 @@ module.exports = {
   "version": "1.0.0",
   "private": true,
   "main": "index.js",
+  "scripts": {
+    "test": "egg-bin test"
+  },
   "dependencies": {
     "@gd/shared": "*",
     "@alicloud/ecs20140526": "6.1.0",
@@ -202,6 +215,8 @@ module.exports = {
   }
 }
 ```
+
+注: scheduler 有现存回归测试 `test/index.test.js`（"scheduler rule ownership"，mock 阿里云 SDK + `swas-firewall`，断言 `index.js#__private__.handleEcsRuleConfig` / `handleSwasRuleConfig` 不动手工规则、做正确去重等行为）——必须给 scheduler 配 `scripts.test`，否则根 `npm test -ws --if-present` 会跳过这个 package，scheduler 覆盖完全丢失。
 
 ### 5.5 `packages/cli/package.json`
 
@@ -232,16 +247,21 @@ module.exports = require('./packages/scheduler');
 
 ### 6.2 根 `config.js`
 
-原根 `config.js` 被 scheduler 的 `index.js` 通过 `require('./config')` 引入；迁移后 scheduler 内部 `require('./config')` 直接解析到 `packages/scheduler/config.js`。
+原根 `config.js`（`DOMAIN` + `RuleConfig`）被两个 package 当 input 读：
 
-根 `config.js` 仍保留为 shim：
+- scheduler `index.js`: `require('./config')`（FC 定时任务）
+- cli `bin/ecs-dsec-handler.js`: `require('../config')`（CLI 工具，line 52: `const { RuleConfig } = require('../config');`）
+
+迁移目标位置：`packages/shared/src/rule-config.js`。scheduler 与 cli 都改为 `require('@gd/shared/src/rule-config')`。
+
+根 `config.js` 仍保留为 shim，兜底外部脚本/CI 直接 `require('./config')` 的旧用法：
 
 ```js
 'use strict';
-module.exports = require('./packages/scheduler/config');
+module.exports = require('@gd/shared/src/rule-config');
 ```
 
-理由：兜底外部脚本/CI 可能 `require('./config')` 拿 `RuleConfig`/`DOMAIN`。文件极小，留着零成本。
+文件极小，留着零成本。**重要**: shim 通过 `@gd/shared` 解析依赖 `node_modules/@gd/shared`，因此根目录的 `npm install` 必须先跑——否则 shim 自身 require 失败。CI 工作流已有 `npm install` 步骤，本地用户使用 shim 的前提也是已经装好依赖。
 
 ### 6.3 根 `bootstrap.js`（FC web 入口）
 
@@ -335,28 +355,99 @@ counterStoreFile: process.env.PASSKEY_COUNTERS_FILE ||
 
 不改 `config.default.js` 计算逻辑，**仅在 README 加 migration note**。
 
-### 7.3 `s.yaml` 与 FC 上传内容
+### 7.3 FC 部署兼容：workspace 依赖实体化
+
+#### 7.3.1 问题陈述
 
 `s.yaml`:
 ```yaml
-gd-web:
-  props: { code: ./ }
-ecs-dsec:
-  props: { code: ./ }
+gd-web:    { props: { code: ./ } }
+ecs-dsec:  { props: { code: ./ } }
 ```
 
-`code: ./` 把仓库根整体上传。npm workspaces 模式下根 `node_modules` 已 hoist 所有依赖、且包含 `packages/*` 的 symlink（指向 `../packages/*`）。**风险**: `s` CLI 上传时是否会跟随 symlink？
+`code: ./` 把仓库根整体上传到 FC。npm workspaces 安装后，`node_modules/@gd/{shared,web,scheduler,cli}` 是 **symlink**（指向 `../../packages/<name>`，相对路径）。两条相关事实：
 
-- 如果跟随：上传内容里 `node_modules/@gd/web` 等被解为实际文件，FC 端 require 正常。
-- 如果不跟随：上传后 `node_modules/@gd/*` 是断 symlink，FC 端 require `@gd/shared` 失败。
+1. **`s` CLI 打包行为不能假设**: 是否跟随 symlink、是否把相对 symlink 重写、是否原样上传 link 节点——版本/平台差异大，不能作为设计前提。
+2. **即使 symlink 原样上传**: 上传内容也同时包含 `packages/*` 实体目录，Node.js 端 `require('@gd/shared')` 从 `node_modules/@gd/shared`（link）→ `../../packages/shared`（target）能解析；但**前提是 link 的相对路径在 FC 上仍指向同一文件树**——这隐含假设 `s` 不会把 symlink 重写成绝对路径。
 
-**对策**：
+硬约束"`s deploy --function code` 后 FC handler 仍生效"不能依赖这些未验证假设。
 
-1. 在实施 plan 里把"`s deploy` 前重新打包"步骤明确化：必要时先 `npm install --omit=dev` 一次确认 `node_modules` 是符号链接还是实体；
-2. 加 `.fcignore` / `package.json` 的 `files`/`bundleDependencies` 都不引入；
-3. 若 `s` 默认行为是不跟随 symlink，准备 fallback：在 `s.yaml` 的 build hook 里加 `npm install --workspaces=false` 后 `cp -rL`，或干脆把 `@gd/shared` 用 npm pack/portal 写法在部署前展开。
+#### 7.3.2 设计决策：实体化 (materialize) workspace symlink
 
-**这一节是已知风险点，需在 implementation plan 的 verification 阶段实际测一次 `s deploy`**（或本地用 `s build` 模拟打包，看产物）才能下结论。spec 不预先选择 fallback 方案。
+在 `s deploy` 前显式把 `node_modules/@gd/*` 的 symlink 替换为目标目录的**实体副本**。上传内容里就不再有 symlink，`require('@gd/shared')` 在 FC 上像普通 npm 包一样从 `node_modules/@gd/shared/` 实体目录解析。
+
+这是确定性方案：完全规避 `s` 打包细节、`tar`/`zip` 链接处理、Node.js symlink 跟随等所有未知行为。
+
+#### 7.3.3 脚本: `scripts/materialize-workspace-deps.sh`
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+GD_NM_DIR="$ROOT/node_modules/@gd"
+
+if [ ! -d "$GD_NM_DIR" ]; then
+  echo "[materialize] no node_modules/@gd directory found; run 'npm install' first" >&2
+  exit 1
+fi
+
+count=0
+for entry in "$GD_NM_DIR"/*; do
+  [ -e "$entry" ] || continue
+  if [ -L "$entry" ]; then
+    target="$(readlink -f "$entry")"
+    if [ ! -d "$target" ]; then
+      echo "[materialize] symlink target missing: $entry -> $target" >&2
+      exit 1
+    fi
+    rm "$entry"
+    cp -R "$target" "$entry"
+    count=$((count + 1))
+    echo "[materialize] $entry <= $target"
+  fi
+done
+
+echo "[materialize] done, materialized $count workspace package(s)"
+```
+
+**为什么是 `cp -R` 而非 `cp -RL`**: `cp -RL` 会展开目标里的所有嵌套 symlink；这里需要的只是顶层 `node_modules/@gd/<name>` 这一层从 link 变实体，里面 `packages/<name>/` 的内容本身没有 symlink，普通 `cp -R` 即可。
+
+**幂等性**: 二次运行时 `-L "$entry"` 为 false（已是实体目录），脚本跳过、计数 0。安全。
+
+#### 7.3.4 集成：CI workflow + npm script
+
+`.github/workflows/fc-deploy.yaml` 现状：
+```yaml
+- run: npm install --production
+- ...
+- run: s deploy --function code --assume-yes
+```
+
+改造为：
+```yaml
+- run: npm install --production
+- run: bash scripts/materialize-workspace-deps.sh
+- ...
+- run: s deploy --function code --assume-yes
+```
+
+或者更简洁，用 npm script 包装（已在 §5.1 加 `predeploy` + `deploy:fc:code`）：
+
+```yaml
+- run: npm install --production
+- ...
+- run: npm run deploy:fc:code
+```
+
+二选一，倾向后者——`predeploy` 是 npm 标准 hook，调用 `deploy:fc:code` 时自动跑实体化，避免 CI 顺序错排成"`s deploy` 在实体化之前"。
+
+**本地 `s deploy`**: README 同步更新，提示用户走 `npm run deploy:fc:code` 而不是直接 `s deploy --type code`，或自己先跑一次 `bash scripts/materialize-workspace-deps.sh`。
+
+#### 7.3.5 已知副作用与权衡
+
+- 实体化后 `node_modules/@gd/shared` 与 `packages/shared` 是两份独立副本——在 CI 上无所谓（容器即弃），但**本地开发者**若跑了 `npm run deploy:fc:code` 之后改 `packages/shared/src/...` 源码，运行时仍可能从 `node_modules/@gd/shared/src/...`（旧副本）解析，导致改动看不到生效。**对策**：README 注明"本地跑过 deploy 准备脚本后想恢复 link，重新 `npm install` 即可"——`npm install` 会重建 `node_modules/@gd/*` 为 symlink。
+- 实体化只在部署路径上跑；日常 `npm test` / `npm run dev` 走原始 symlink 路径，开发体验不变。
 
 ### 7.4 CLI 的 cwd 行为
 
@@ -370,27 +461,36 @@ ecs-dsec:
 
 ### 8.1 测试文件迁移映射
 
-| 旧路径 | 新路径 |
-|---|---|
-| `test/index.test.js` | `packages/web/test/index.test.js` |
-| `test/app/controller/openapi.test.js` | `packages/web/test/app/controller/openapi.test.js` |
-| `test/app/middleware/jwt_auth.test.js` | `packages/web/test/app/middleware/jwt_auth.test.js` |
-| `test/app/middleware/password_auth.test.js` | `packages/web/test/app/middleware/password_auth.test.js` |
-| `test/app/service/aliyun.test.js` | `packages/web/test/app/service/aliyun.test.js` |
-| `test/lib/access-token.test.js` | `packages/web/test/lib/access-token.test.js` |
-| `test/lib/passkey.test.js` | `packages/web/test/lib/passkey.test.js` |
-| `test/lib/passkey-counter-store.test.js` | `packages/web/test/lib/passkey-counter-store.test.js` |
-| `test/lib/firewall-rule.test.js` | `packages/shared/test/firewall-rule.test.js` |
-| `test/lib/swas-firewall.test.js` | `packages/shared/test/swas-firewall.test.js` |
-| `test/lib/handler-swas-open.test.js` | `packages/shared/test/handler-swas-open.test.js` |
+| 旧路径 | 新路径 | 说明 |
+|---|---|---|
+| `test/index.test.js` | `packages/scheduler/test/index.test.js` | scheduler 回归测试，mock `@alicloud/*` + `swas-firewall`，断言 `handleEcsRuleConfig` / `handleSwasRuleConfig` 行为 |
+| `test/app/controller/openapi.test.js` | `packages/web/test/app/controller/openapi.test.js` | |
+| `test/app/middleware/jwt_auth.test.js` | `packages/web/test/app/middleware/jwt_auth.test.js` | |
+| `test/app/middleware/password_auth.test.js` | `packages/web/test/app/middleware/password_auth.test.js` | |
+| `test/app/service/aliyun.test.js` | `packages/web/test/app/service/aliyun.test.js` | |
+| `test/lib/access-token.test.js` | `packages/web/test/lib/access-token.test.js` | |
+| `test/lib/passkey.test.js` | `packages/web/test/lib/passkey.test.js` | |
+| `test/lib/passkey-counter-store.test.js` | `packages/web/test/lib/passkey-counter-store.test.js` | |
+| `test/lib/firewall-rule.test.js` | `packages/shared/test/firewall-rule.test.js` | |
+| `test/lib/swas-firewall.test.js` | `packages/shared/test/swas-firewall.test.js` | |
+| `test/lib/handler-swas-open.test.js` | `packages/shared/test/handler-swas-open.test.js` | |
 
-测试文件内 `require` 路径同步改为新位置（相对路径或 `@gd/*`）。
+测试文件内 `require` 路径同步改为新位置：
+
+- **scheduler `test/index.test.js`** 用 `require.resolve('../lib/firewall-rule')`、`require.resolve('../lib/swas-firewall')` 做 `require.cache` 投毒。迁移后 scheduler `index.js` 改成 require `@gd/shared/src/firewall-rule` 与 `@gd/shared/src/swas-firewall`，测试的 `require.resolve` 路径必须同步改成 `@gd/shared/src/firewall-rule`、`@gd/shared/src/swas-firewall`——否则 mock 不会命中 `index.js` 实际 require 的那个模块，所有 mock 测试静默失效。
+- web 测试内 `require('../../app/...')` 改成 `require('../../app/...')`（相对位置一致，无需变化）；对应 `lib/*` 测试中的 `require('../../lib/access-token')` 等也保持相对路径。
+- shared 测试内 `require('../../lib/firewall-rule')` 等改为相对路径 `require('../src/firewall-rule')`。
 
 ### 8.2 测试 runner
 
-每个 package `scripts.test = "egg-bin test"`；根 `npm test = npm test -ws --if-present`，遍历所有 workspace。
+| Package | `scripts.test` | 跑哪些 |
+|---|---|---|
+| `@gd/shared` | `egg-bin test` | firewall-rule、swas-firewall、handler-swas-open |
+| `@gd/web` | `egg-bin test` | 全部 web 单测 + Egg 集成测试 |
+| `@gd/scheduler` | `egg-bin test` | `test/index.test.js` |
+| `@gd/cli` | （无 test 脚本） | 暂无 |
 
-scheduler 和 cli 当前没有 unit test。它们的 package 不写 `scripts.test`，`-ws --if-present` 自动跳过。
+根 `npm test = npm test -ws --if-present` 自动跳过 cli。**`@gd/scheduler` 必须显式声明 `scripts.test`**，否则 scheduler 回归覆盖完全消失。
 
 ### 8.3 测试中潜在的"跨包内部相对引用"
 
@@ -403,35 +503,52 @@ scheduler 和 cli 当前没有 unit test。它们的 package 不写 `scripts.tes
 | # | 验证 | 命令 |
 |---|---|---|
 | V1 | `npm install` 成功，`node_modules/@gd/*` 是 symlink 指 `packages/*` | `ls -l node_modules/@gd` |
-| V2 | 全部测试通过 | `npm test` |
+| V2 | 全部测试通过，且 scheduler 测试**真的跑了** | `npm test` 输出包含 `@gd/scheduler` 的 `scheduler rule ownership` describe 块 |
 | V3 | web 本地起服 | `npm run dev` 后访问 `http://127.0.0.1:7001` |
 | V4 | scheduler handler 可调用 | `node -e "require('./index').handler({},{},console.log)"`（缺凭证应正常报错，而非 module-not-found） |
 | V5 | CLI dry-run | `node bin/ecs-dsec-handler.js --help` 及 `--dry-run` |
 | V6 | 根 bin shim 可执行 | `chmod +x bin/ecs-dsec-handler.js`，`./bin/ecs-dsec-handler.js --help` |
-| V7 | s.yaml 打包后 node_modules 完整 | `s build` 或 `s deploy --dry-run` 看产物（这一步若工具不支持就在测试环境做一次真实部署） |
-| V8 | 旧 README 命令示例仍可用 | 按 README 第 49-77 行命令逐条手测 |
+| V7 | CLI 读到 `RuleConfig` | CLI 在 `--dry-run` 下打印它扫描的 `swas-open` 配置项数量，与 `packages/shared/src/rule-config.js` 中 `RuleConfig.filter(c=>c.product==='swas-open').length` 一致 |
+| V8 | `npx ecs-dsec-handler` 入口正常 | `npm install` 后 `npx ecs-dsec-handler --help` |
+| V9 | 实体化脚本可独立跑 | `npm install && bash scripts/materialize-workspace-deps.sh`，再 `ls -l node_modules/@gd` 全部不是 symlink |
+| V10 | 实体化后 require 仍可解析 | 实体化后跑 `node -e "console.log(require('@gd/shared/src/firewall-rule').PORT_RANGE)"` 输出 `1/65535` |
+| V11 | 实体化幂等 | 连跑两次 `bash scripts/materialize-workspace-deps.sh`，第二次 "materialized 0 workspace package(s)" |
+| V12 | `npm run deploy:fc:code` 链路 | `npm install --production && npm run deploy:fc:code` 在 dry-run 或测试环境真实部署一次，FC 端启动无 `Cannot find module '@gd/shared'` |
+| V13 | 旧 README 命令示例仍可用 | 按 README 第 49-77 行命令逐条手测 |
 
 ## 10. 实施步骤（高层次）
 
 详细步骤进入 implementation plan。这里仅锚定大块：
 
 1. 建包骨架：`packages/{shared,web,scheduler,cli}` + 各 `package.json`。
-2. 移动源码：
-   - lib/* → 拆 shared + web（按 §4 映射）
-   - app/ + config/ + 原 bootstrap → packages/web/
-   - 原 index.js + config.js → packages/scheduler/
-   - bin/* → packages/cli/bin/
+2. 移动源码（用 `git mv` 保 history）：
+   - `lib/*` → 拆 `@gd/shared/src/*` + `@gd/web/lib/*`（按 §4 映射）
+   - 根 `config.js` → `packages/shared/src/rule-config.js`
+   - `app/` + `config/` + 根 `bootstrap.js` → `packages/web/`
+   - 根 `index.js` → `packages/scheduler/index.js`
+   - `bin/*` → `packages/cli/bin/`
 3. 改全部 require 路径：
-   - web 内部 `../../lib/<x>` → `@gd/shared/src/<x>` 或 `../../lib/<x>`（web 私有 lib）
-   - scheduler 内部 `./lib/<x>` → `@gd/shared/src/<x>`
-   - cli 内部 `../lib/<x>` → `@gd/shared/src/<x>`
+   - web 内部 `../../lib/{firewall-rule,swas-firewall,ecs-firewall,ip,aliyun-conf}` → `@gd/shared/src/<x>`
+   - web 内部 `../../lib/{access-token,passkey,passkey-counter-store}` → 包内相对（位置在 `packages/web/lib/`，相对路径保持 `../../lib/<x>`）
+   - scheduler `index.js` 的 `./lib/<x>` → `@gd/shared/src/<x>`
+   - scheduler `index.js` 的 `./config` → `@gd/shared/src/rule-config`
+   - cli `bin/ecs-dsec-handler.js` 的 `../lib/<x>` → `@gd/shared/src/<x>`
+   - cli `bin/ecs-dsec-handler.js` 的 `../config` → `@gd/shared/src/rule-config`
 4. 改 `aliyun-conf.findRepoRoot` 识别 workspaces 根（§7.1）。
 5. 写根 shim：`index.js`、`config.js`、`bootstrap.js`、`bin/ecs-dsec-handler.js`（§6）。
-6. 更新根 `package.json`：workspaces、scripts、devDependencies（§5.1）。
-7. 移动测试 + 调 require（§8.1）。
-8. `npm install` → `npm test`。
-9. 执行 §9 V1–V8 全清单验证。
-10. 更新 README "项目结构" / "快速开始" / "本地开发" 章节，加 passkey counter 迁移 note。
+6. 更新根 `package.json`：workspaces、scripts（含 `predeploy`/`deploy:fc:code`）、devDependencies（§5.1）。
+7. 移动测试 + 调 require（§8.1）：
+   - **scheduler 测试**: `test/index.test.js` → `packages/scheduler/test/index.test.js`，把 `require.resolve('../lib/swas-firewall')` 改成 `require.resolve('@gd/shared/src/swas-firewall')`，并给 `@gd/scheduler` 加 `scripts.test`（§5.4）。
+   - 其它测试按 §8.1 映射移动 + 调 require。
+8. 新建 `scripts/materialize-workspace-deps.sh` 并 `chmod +x`（§7.3.3）。
+9. 改造 `.github/workflows/fc-deploy.yaml`：把 `s deploy --function code --assume-yes` 替换为 `npm run deploy:fc:code`（§7.3.4）。
+10. `npm install` → `npm test` 全绿。
+11. 执行 §9 V1–V13 全清单验证；特别是 V12 在测试环境实跑一次 FC 部署。
+12. 更新 README "项目结构" / "快速开始" / "本地开发" / "部署" 章节，加：
+    - monorepo 概述 + 包列表
+    - passkey counter 路径迁移 note
+    - 本地 `s deploy` 改用 `npm run deploy:fc:code`
+    - 实体化对本地开发的副作用（运行后想恢复 symlink 重新 `npm install`）
 
 ## 11. 不在本次范围
 
