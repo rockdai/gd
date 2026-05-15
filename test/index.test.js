@@ -2,13 +2,13 @@
 
 const assert = require('assert');
 
-const { PORT_RANGE } = require('../lib/firewall-rule');
+const { PORT_RANGE } = require('@gd/shared/src/firewall-rule');
 
 function loadIndexWithMocks({ ecsRules = [], swasRules = [], swasModifyError = null } = {}) {
   const indexPath = require.resolve('../index');
   const ecsSdkPath = require.resolve('@alicloud/ecs20140526');
   const swasSdkPath = require.resolve('@alicloud/swas-open20200601');
-  const swasFirewallPath = require.resolve('../lib/swas-firewall');
+  const swasFirewallPath = require.resolve('@gd/shared/src/swas-firewall');
 
   const previousCache = new Map([
     [ indexPath, require.cache[indexPath] ],

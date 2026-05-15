@@ -3,13 +3,13 @@
 const assert = require('assert');
 
 const AliyunService = require('../../../app/service/aliyun');
-const { PORT_RANGE } = require('../../../lib/firewall-rule');
+const { PORT_RANGE } = require('@gd/shared/src/firewall-rule');
 
 function loadAliyunServiceWithMocks({ ecsRules = [], swasRules = [], ecsListError = null, swasListError = null } = {}) {
   const servicePath = require.resolve('../../../app/service/aliyun');
   const ecsSdkPath = require.resolve('@alicloud/ecs20140526');
   const swasSdkPath = require.resolve('@alicloud/swas-open20200601');
-  const swasFirewallPath = require.resolve('../../../lib/swas-firewall');
+  const swasFirewallPath = require.resolve('@gd/shared/src/swas-firewall');
 
   const previousCache = new Map([
     [ servicePath, require.cache[servicePath] ],

@@ -1,7 +1,7 @@
 'use strict';
 
 const { Controller } = require('egg');
-const { isValidIpv4 } = require('../../lib/ip');
+const { isValidIpv4 } = require('@gd/shared/src/ip');
 
 const SUPPORTED_PRODUCTS = new Set([ 'ecs', 'swas-open' ]);
 

@@ -2,8 +2,8 @@
 
 'use strict';
 
-const { handleSwasOpen } = require('../lib/handler-swas-open');
-const { getPublicIp } = require('../lib/public-ip');
+const { handleSwasOpen } = require('@gd/shared/src/handler-swas-open');
+const { getPublicIp } = require('@gd/shared/src/public-ip');
 
 const DEFAULT_REMARK = 'ecs-dsec-handler';
 
@@ -42,14 +42,14 @@ function parseArgs(argv) {
     const ip = args.ip || await getPublicIp();
     console.log('[ecs-dsec-handler] public ip =', ip);
 
-    const { resolveCredentials } = require('../lib/aliyun-conf');
+    const { resolveCredentials } = require('@gd/shared/src/aliyun-conf');
     const { accessKeyId, accessKeySecret, source } = resolveCredentials({ cwd: __dirname });
     if (!accessKeyId || !accessKeySecret) {
       throw new Error('Missing credentials: set env ACCESS_KEY_ID/ACCESS_KEY_SECRET, or create .aliyun.conf (see .aliyun.conf.example)');
     }
     console.log('[ecs-dsec-handler] credential source =', source || '(unknown)');
 
-    const { RuleConfig } = require('../config');
+    const { RuleConfig } = require('@gd/shared/src/rule-config');
 
     // For now we only implement swas-open, since current config is swas-open.
     for (const conf of RuleConfig) {

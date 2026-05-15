@@ -20,7 +20,7 @@ const {
   parseRuleTimestamp,
   findManagedRule,
   findRuleByProtocolPortSource,
-} = require('../../lib/firewall-rule');
+} = require('../src/firewall-rule');
 
 describe('firewall-rule helpers', () => {
   it('normalizes IP to /32', () => {
