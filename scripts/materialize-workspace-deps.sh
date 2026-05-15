@@ -21,7 +21,7 @@ for pkg_dir in "$PACKAGES_DIR"/*/; do
     continue
   fi
 
-  pkg_name="$(node -p "require('$pkg_json').name")"
+  pkg_name="$(node -e "console.log(require(process.argv[1]).name)" "$pkg_json")"
   case "$pkg_name" in
     @gd/*) ;;
     *)
@@ -35,6 +35,14 @@ for pkg_dir in "$PACKAGES_DIR"/*/; do
 
   rm -rf "$dest"
   cp -R "$pkg_dir" "$dest"
+
+  # Strip non-runtime artifacts: tests + nested node_modules don't need to ride along
+  # into the FC code package (s.yaml uploads ./ which already contains packages/*/test/
+  # at the source location, so keeping them in node_modules/@gd/<x>/ would double the
+  # bytes uploaded). .mochawesome-reports lives under node_modules/ which is already
+  # rm'd here, but list it explicitly in case tests get reconfigured later.
+  rm -rf "$dest/test" "$dest/node_modules" "$dest/.mochawesome-reports"
+
   count=$((count + 1))
   echo "[materialize] $dest <= $pkg_dir (refreshed)"
 done

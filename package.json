@@ -10,8 +10,8 @@
   "scripts": {
     "dev":   "npm run dev   -w @gd/web",
     "start": "npm run start -w @gd/web",
-    "test":  "npm test -ws --if-present",
-    "cov":   "npm run cov -ws --if-present"
+    "test":  "npm test --workspaces --if-present --include-workspace-root=false",
+    "cov":   "npm run cov --workspaces --if-present --include-workspace-root=false"
   },
   "devDependencies": {
     "egg-bin": "^6.13.0"
