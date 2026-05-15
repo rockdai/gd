@@ -50,8 +50,12 @@ describe('findRepoRoot via loadAliyunConf', () => {
       path.join(baseDir, '.aliyun.conf'),
       'ACCESS_KEY_ID=single-id\nACCESS_KEY_SECRET=single-sec'
     );
+    // Start from a nested directory that has no package.json of its own,
+    // forcing findRepoRoot to walk up and find the topmost package.json.
+    const deepDir = path.join(baseDir, 'src', 'util');
+    fs.mkdirSync(deepDir, { recursive: true });
 
-    const { values } = loadAliyunConf({ cwd: baseDir });
+    const { values } = loadAliyunConf({ cwd: deepDir });
     assert.deepStrictEqual(values, {
       ACCESS_KEY_ID: 'single-id',
       ACCESS_KEY_SECRET: 'single-sec',
