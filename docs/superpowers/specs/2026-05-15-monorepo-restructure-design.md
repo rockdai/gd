@@ -380,40 +380,62 @@ ecs-dsec:  { props: { code: ./ } }
 
 #### 7.3.3 脚本: `scripts/materialize-workspace-deps.sh`
 
+**核心语义**: 以 `packages/*` 为权威源，**每次运行都重新刷一份**到 `node_modules/@gd/*`。不观察 `node_modules` 现在是 symlink 还是实体——直接 `rm -rf` 再 `cp -R`。
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PACKAGES_DIR="$ROOT/packages"
 GD_NM_DIR="$ROOT/node_modules/@gd"
 
-if [ ! -d "$GD_NM_DIR" ]; then
-  echo "[materialize] no node_modules/@gd directory found; run 'npm install' first" >&2
+if [ ! -d "$PACKAGES_DIR" ]; then
+  echo "[materialize] no packages/ directory at $PACKAGES_DIR" >&2
   exit 1
 fi
 
+mkdir -p "$GD_NM_DIR"
+
 count=0
-for entry in "$GD_NM_DIR"/*; do
-  [ -e "$entry" ] || continue
-  if [ -L "$entry" ]; then
-    target="$(readlink -f "$entry")"
-    if [ ! -d "$target" ]; then
-      echo "[materialize] symlink target missing: $entry -> $target" >&2
-      exit 1
-    fi
-    rm "$entry"
-    cp -R "$target" "$entry"
-    count=$((count + 1))
-    echo "[materialize] $entry <= $target"
+for pkg_dir in "$PACKAGES_DIR"/*/; do
+  pkg_dir="${pkg_dir%/}"
+  pkg_json="$pkg_dir/package.json"
+  if [ ! -f "$pkg_json" ]; then
+    echo "[materialize] skip $pkg_dir (no package.json)" >&2
+    continue
   fi
+
+  pkg_name="$(node -p "require('$pkg_json').name")"
+  case "$pkg_name" in
+    @gd/*) ;;
+    *)
+      echo "[materialize] skip $pkg_dir (name '$pkg_name' not under @gd/*)" >&2
+      continue
+      ;;
+  esac
+
+  pkg_short="${pkg_name#@gd/}"
+  dest="$GD_NM_DIR/$pkg_short"
+
+  rm -rf "$dest"
+  cp -R "$pkg_dir" "$dest"
+  count=$((count + 1))
+  echo "[materialize] $dest <= $pkg_dir (refreshed)"
 done
 
-echo "[materialize] done, materialized $count workspace package(s)"
+echo "[materialize] done, refreshed $count workspace package(s)"
 ```
 
-**为什么是 `cp -R` 而非 `cp -RL`**: `cp -RL` 会展开目标里的所有嵌套 symlink；这里需要的只是顶层 `node_modules/@gd/<name>` 这一层从 link 变实体，里面 `packages/<name>/` 的内容本身没有 symlink，普通 `cp -R` 即可。
+**为什么不再"观察 symlink"**: 上一版脚本只在 `node_modules/@gd/<name>` 是 symlink 时才动手。这会产生一个常见失败路径：本地第一次 `s deploy` 后 `node_modules/@gd/shared` 已是实体副本；之后改 `packages/shared/src/...` 源码，再 `s deploy`，pre-deploy 钩子见到不是 symlink 就跳过，上传的仍是旧副本。所以脚本必须以 `packages/*` 为权威，**每次都重写**。
 
-**幂等性**: 二次运行时 `-L "$entry"` 为 false（已是实体目录），脚本跳过、计数 0。安全。
+**为什么用 `node -p` 读 `package.json.name`**: 包名（如 `@gd/shared`）才是 `require('@gd/shared')` 解析的唯一依据。靠目录名约定容易在重命名 / 加非 `@gd/*` 包时静默错配。
+
+**为什么是 `cp -R` 而非 `cp -RL`**: `cp -RL` 会展开 `packages/<name>/` 里所有嵌套 symlink；我们要的只是顶层 `node_modules/@gd/<name>` 从 link/旧副本变成与 `packages/<name>/` 内容一致的实体，里面本身没有 symlink，普通 `cp -R` 即可。
+
+**幂等性的正确含义**: "同样的 `packages/*` 源 → 同样的 `node_modules/@gd/*` 内容"。不是"二次运行 count=0"。脚本每次都做完整刷新；同一 deploy 内被两个 resource 钩子调用两次也只是相同工作做两次，开销可忽略。
+
+**多次运行的副作用**: 每次都 `rm -rf` + `cp -R`，I/O 量 = 所有 `@gd/*` 包文件大小之和。当前 4 个包都是源码级 npm package，无 build 产物，总量小（KB-MB 级），可忽略。
 
 #### 7.3.4 集成：`s.yaml` 的 `actions.pre-deploy` 钩子
 
@@ -466,17 +488,18 @@ resources:
 
 要点：
 
-- **per-resource 重复声明**: Serverless Devs v3 的 `actions` 是资源级字段；同一个钩子要分别挂到 `gd-web` 与 `ecs-dsec` 下。`s deploy --function code` 一次部署两个函数时两条钩子都会跑——第二次因为脚本幂等（§7.3.3）count=0，零额外成本。
+- **per-resource 重复声明**: Serverless Devs v3 的 `actions` 是资源级字段；同一个钩子要分别挂到 `gd-web` 与 `ecs-dsec` 下。`s deploy --function code` 一次部署两个函数时两条钩子都会跑——脚本以 `packages/*` 为权威每次都完整刷新（§7.3.3），等于把同一份工作做了两遍，单次开销很小（仅 KB-MB 级的 `cp -R`），可忽略。
 - **`path: ./`**: 命令在仓库根执行，与 `scripts/materialize-workspace-deps.sh` 的根目录依赖一致。
 - **CI workflow 不变**: `.github/workflows/fc-deploy.yaml` 维持现有 `s deploy --function code --assume-yes`；钩子在 `s` CLI 内部接管。
-- **本地 README 不变**: README "部署到函数计算 FC" 一节展示的 `s deploy --type code` 维持原样，仅在文字里补一句"`s.yaml` 已包含 pre-deploy 钩子，会自动实体化 workspace 依赖，无需手动处理"。
+- **本地 README 不变**: README "部署到函数计算 FC" 一节展示的 `s deploy --type code` 维持原样，仅在文字里补一句"`s.yaml` 已包含 pre-deploy 钩子，会自动实体化 workspace 依赖到 `node_modules/@gd/*`，无需手动处理"。
 
 **为什么不在 npm 层另开 `deploy:fc:code` 脚本**: 多一条入口反而增加用户认知负担、且与硬约束"旧 `s deploy --type code` 必须工作"间产生分歧（用户走旧命令时容易绕过 wrapper）。`s.yaml` 钩子是单一真相源，任何 `s deploy` 调用都安全。
 
 #### 7.3.5 已知副作用与权衡
 
-- 实体化后 `node_modules/@gd/shared` 与 `packages/shared` 是两份独立副本——在 CI 上无所谓（容器即弃），但**本地开发者**若跑过一次 `s deploy`（触发 pre-deploy 钩子），之后修改 `packages/shared/src/...` 源码，运行时仍可能从 `node_modules/@gd/shared/src/...`（旧副本）解析，导致改动看不到生效。**对策**：README 注明"本地跑过 `s deploy` 后想恢复 symlink，重新 `npm install` 即可"——`npm install` 会重建 `node_modules/@gd/*` 为 symlink。
-- 实体化只在部署路径上跑；日常 `npm test` / `npm run dev` 走原始 symlink 路径，开发体验不变。
+- **部署链路上无副作用**: 每次 `s deploy` 都把 `packages/*` 最新内容刷进 `node_modules/@gd/*`，上传的代码包永远反映当前源码状态。第 3 轮 review 指出的"二次部署上传旧副本"问题被这一语义直接消除。
+- **本地开发副作用**: 一次 `s deploy` 之后，`node_modules/@gd/*` 从 npm workspaces 建的 symlink 变成静态实体副本。此后再编辑 `packages/shared/src/...` 源码，`npm test` / `npm run dev` 这种走 `require('@gd/shared')` 解析的进程会从**旧的静态副本**读源码，改动不可见。**对策**：README 注明"本地跑过 `s deploy` 后想恢复实时联动，重新 `npm install` 即可"——`npm install` 会重建 `node_modules/@gd/*` 为 symlink 指回 `packages/*`。CI 上是临时容器，无此影响。
+- **可选改进**: 若日后觉得本地"deploy 后必须 `npm install`"太烦，可把 `s.yaml` 钩子改为复制到独立的 `dist/` 目录、把 `code: ./` 改为 `code: ./dist`，不动 `node_modules/`。本轮 spec 不引入这个变形，以维持 `code: ./` 现状最小化 `s.yaml` 变更面。
 
 ### 7.4 CLI 的 cwd 行为
 
@@ -541,7 +564,7 @@ resources:
 | V8 | `npx ecs-dsec-handler` 入口正常 | `npm install` 后 `npx ecs-dsec-handler --help` |
 | V9 | 实体化脚本可独立跑 | `npm install && bash scripts/materialize-workspace-deps.sh`，再 `ls -l node_modules/@gd` 全部不是 symlink |
 | V10 | 实体化后 require 仍可解析 | 实体化后跑 `node -e "console.log(require('@gd/shared/src/firewall-rule').PORT_RANGE)"` 输出 `1/65535` |
-| V11 | 实体化幂等 | 连跑两次 `bash scripts/materialize-workspace-deps.sh`，第二次 "materialized 0 workspace package(s)" |
+| V11 | 脚本每次都以源为权威刷新 | `bash scripts/materialize-workspace-deps.sh` → 编辑 `packages/shared/src/__verify__.txt` 写入 `v2` → 再跑一次 → 断言 `grep -q v2 node_modules/@gd/shared/src/__verify__.txt`；最后 `rm packages/shared/src/__verify__.txt`、再跑一次、断言该文件不再出现在 node_modules 副本下（确认删除也同步） |
 | V12 | `s.yaml` 钩子自动触发实体化 | 测试环境跑 `npm install --production && s deploy --function code --assume-yes`，FC 端启动无 `Cannot find module '@gd/shared'`；脚本输出中能看到 `[materialize] ... <= ...` 行 |
 | V13 | 旧 README 命令示例仍可用 | 按 README 第 49-77 行命令逐条手测（包含 `s deploy --type code` 直接调用） |
 
