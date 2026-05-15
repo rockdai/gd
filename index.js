@@ -1,3 +1,5 @@
+'use strict';
+
 const {
   default: ECSClient,
   ModifySecurityGroupRuleRequest,
