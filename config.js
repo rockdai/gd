@@ -39,9 +39,9 @@ exports.RuleConfig = [{
     { name: DOMAIN.XFYJ_BK },
   ],
 }, {
-  // i-6wefxjm4h7469tvpt8nb
+  // i-6we5bo95gjitc6gjbvrd (z.keydiary.dev)
   product: 'ecs',
-  groupId: 'sg-6wee58xlpzqik1buhlzg',
+  groupId: 'sg-6we8w7b53xb740p9vypz',
   regionId: 'ap-northeast-1',
   ruleList: [
     { name: DOMAIN.XFYJ },
@@ -54,6 +54,7 @@ exports.RuleConfig = [{
   regionId: 'cn-hongkong',
   ruleList: [
     { name: DOMAIN.XFYJ, id: '351ba5164d41414e9dcc8ca00840f8b6' },
+    { name: DOMAIN.XFYJ_BK },
   ],
 }, {
   // b.keydiary.dev
@@ -62,5 +63,6 @@ exports.RuleConfig = [{
   regionId: 'cn-hongkong',
   ruleList: [
     { name: DOMAIN.XFYJ, id: '64415df03cd94c0f9385f4106960b584' },
+    { name: DOMAIN.XFYJ_BK },
   ],
 }];
