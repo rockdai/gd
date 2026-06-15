@@ -15,6 +15,11 @@
       padding: 0;
     }
 
+    button, a, label, input, [role="button"] {
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       background: #f0f2f5;
@@ -143,6 +148,8 @@
       cursor: pointer;
       transition: all 0.2s;
       text-decoration: none;
+      -webkit-user-select: none;
+      user-select: none;
     }
 
     .btn:disabled {
@@ -159,6 +166,10 @@
       background: #096dd9;
     }
 
+    .btn-primary:active:not(:disabled) {
+      background: #0050b3;
+    }
+
     .btn-success {
       background: #52c41a;
       color: white;
@@ -166,6 +177,10 @@
 
     .btn-success:hover:not(:disabled) {
       background: #389e0d;
+    }
+
+    .btn-success:active:not(:disabled) {
+      background: #237804;
     }
 
     .btn-small {
@@ -191,7 +206,7 @@
       padding: 8px 12px;
       border: 1px solid #d9d9d9;
       border-radius: 6px;
-      font-size: 14px;
+      font-size: 16px;
       font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
       outline: none;
       transition: border-color 0.2s;
@@ -212,6 +227,13 @@
       padding: 12px 0;
       border-bottom: 1px solid #f0f0f0;
       gap: 12px;
+      cursor: pointer;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .machine-item:active {
+      background: #f5f5f5;
     }
 
     .machine-item:last-child {
@@ -219,8 +241,8 @@
     }
 
     .machine-item input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
+      width: 22px;
+      height: 22px;
       accent-color: #1890ff;
       flex-shrink: 0;
     }
@@ -278,8 +300,8 @@
     }
 
     .select-all input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
+      width: 22px;
+      height: 22px;
       accent-color: #1890ff;
     }
 
@@ -400,7 +422,7 @@
       padding: 10px 14px;
       border: 1px solid #d9d9d9;
       border-radius: 6px;
-      font-size: 15px;
+      font-size: 16px;
       outline: none;
       margin-bottom: 14px;
       transition: border-color 0.2s;
@@ -473,6 +495,7 @@
     }
 
     .btn-logout:hover { background: rgba(255,255,255,0.35); }
+    .btn-logout:active { background: rgba(255,255,255,0.45); }
 
     .header { position: relative; }
 
@@ -1177,7 +1200,7 @@
       const badgeClass = m.product === 'ecs' ? 'badge-ecs' : 'badge-swas';
       const productLabel = m.product === 'ecs' ? 'ECS' : '轻量服务器';
       const ips = (m.publicIpAddress || []).join(', ') || '无公网 IP';
-      let html = '<li class="machine-item">';
+      let html = '<li class="machine-item" onclick="handleMachineItemClick(event)">';
       html += '<input type="checkbox" class="machine-checkbox" data-index="' + i + '" onchange="handleMachineCheckboxChange()" />';
       html += '<div class="machine-info">';
       html += '<div class="machine-name">' + escapeHtml(m.instanceName) + '</div>';
@@ -1237,6 +1260,15 @@
       const checkedCount = visibleCheckboxes.filter(cb => cb.checked).length;
       selectAll.checked = checkedCount === visibleCheckboxes.length;
       selectAll.indeterminate = checkedCount > 0 && checkedCount < visibleCheckboxes.length;
+    }
+
+    function handleMachineItemClick(e) {
+      if (e.target.type === 'checkbox') return;
+      const cb = e.currentTarget.querySelector('.machine-checkbox');
+      if (cb) {
+        cb.checked = !cb.checked;
+        handleMachineCheckboxChange();
+      }
     }
 
     function handleMachineCheckboxChange() {
