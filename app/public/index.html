@@ -228,8 +228,6 @@
       border-bottom: 1px solid #f0f0f0;
       gap: 12px;
       cursor: pointer;
-      -webkit-user-select: none;
-      user-select: none;
     }
 
     .machine-item:active {
@@ -1264,6 +1262,8 @@
 
     function handleMachineItemClick(e) {
       if (e.target.type === 'checkbox') return;
+      const selection = window.getSelection();
+      if (selection && selection.toString().length > 0) return;
       const cb = e.currentTarget.querySelector('.machine-checkbox');
       if (cb) {
         cb.checked = !cb.checked;
