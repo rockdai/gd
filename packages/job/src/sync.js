@@ -62,7 +62,10 @@ async function runOnce({ config, deps = DEFAULT_DEPS, logger = console }) {
   const remark = buildManagedJobRemark(config.label);
   const { credential } = config;
 
-  const machines = await deps.listMachines({ credential, regions: config.regions, logger });
+  const { machines, failures: discoveryFailures } = await deps.listMachines({ credential, regions: config.regions, logger });
+  // 某个地域/产品列不出来（权限被收、区域故障）→ 那部分机器这一轮根本没对账，必须算失败，
+  // 不然权限全没了的时候会打出 "0 machine(s), 0 failed" 这种假绿
+  summary.failures += discoveryFailures.length;
   for (const missing of findMissingEntries(machines, [ ...config.allow, ...config.deny ])) {
     logger.info(`[gd-job] configured machine not found, skipping: ${missing}`);
   }

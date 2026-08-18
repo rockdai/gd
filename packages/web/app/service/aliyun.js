@@ -37,11 +37,13 @@ class AliyunService extends Service {
    * List all user machines across regions (ECS + SWAS)
    */
   async listMachines() {
-    return listMachines({
+    // 单个地域列举失败已由 shared 记 warn；web 这里保持原行为——把拿到的机器返回给前端
+    const { machines } = await listMachines({
       credential: this.getCredential(),
       regions: this.config.aliyun.regions || [],
       logger: this.logger,
     });
+    return machines;
   }
 
   /**

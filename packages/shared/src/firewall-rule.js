@@ -78,8 +78,14 @@ function buildManagedJobRemark(label, timestamp = formatDateTime()) {
   return `${GD_JOB_RULE_PREFIX}:${label}@${timestamp}`;
 }
 
+// gd-job 是新前缀、只有一种生成形态 `gd-job:<label>@<时间戳>`，所以按精确形态匹配：
+// 最后一个 @ 之前必须恰好是 gd-job:<label>，之后必须是合法时间戳。
+// 前缀匹配（hasRemarkPrefix）会把手工写的 `gd-job:home@note@<ts>` 也当成自己的，进而可能误删。
 function isManagedJobRemark(value, label) {
-  return hasRemarkPrefix(value, `${GD_JOB_RULE_PREFIX}:${label}`);
+  if (typeof value !== 'string') return false;
+  const at = value.lastIndexOf('@');
+  if (at === -1) return false;
+  return value.slice(0, at) === `${GD_JOB_RULE_PREFIX}:${label}` && parseRuleTimestamp(value) !== null;
 }
 
 function isOurManagedRemark(value) {

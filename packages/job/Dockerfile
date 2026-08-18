@@ -1,6 +1,6 @@
 # 构建上下文为仓库根目录：
 #   docker build -f packages/job/Dockerfile -t gd-job .
-FROM node:20-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 

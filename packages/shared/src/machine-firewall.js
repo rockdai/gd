@@ -38,10 +38,25 @@ function swasClient(credential, regionId) {
   return new SWASClient({ endpoint: `swas.${regionId}.aliyuncs.com`, regionId, ...credential });
 }
 
+// 按 pageNumber 翻页直到拿全。fetchPage(pageNumber) → { items, totalCount }
+// 阿里云两个列举接口单页上限都是 100；超过 100 台的账号如果只拿第一页，后面的机器会被静默漏掉。
+async function collectPages(fetchPage, pageSize = 100) {
+  const all = [];
+  for (let pageNumber = 1; ; pageNumber += 1) {
+    const { items, totalCount } = await fetchPage(pageNumber);
+    all.push(...items);
+    if (items.length < pageSize) break;
+    if (typeof totalCount === 'number' && all.length >= totalCount) break;
+  }
+  return all;
+}
+
 async function listEcsInstances({ credential, regionId }) {
-  const resp = await ecsClient(credential, regionId)
-    .describeInstances(new DescribeInstancesRequest({ regionId, pageSize: 100 }));
-  const instances = resp?.body?.instances?.instance || [];
+  const client = ecsClient(credential, regionId);
+  const instances = await collectPages(async pageNumber => {
+    const resp = await client.describeInstances(new DescribeInstancesRequest({ regionId, pageNumber, pageSize: 100 }));
+    return { items: resp?.body?.instances?.instance || [], totalCount: resp?.body?.totalCount };
+  });
   return instances.map(inst => ({
     product: 'ecs',
     instanceId: inst.instanceId,
@@ -55,9 +70,11 @@ async function listEcsInstances({ credential, regionId }) {
 }
 
 async function listSwasInstances({ credential, regionId }) {
-  const resp = await swasClient(credential, regionId)
-    .listInstances(new ListInstancesRequest({ regionId, pageSize: 100 }));
-  const instances = resp?.body?.instances || [];
+  const client = swasClient(credential, regionId);
+  const instances = await collectPages(async pageNumber => {
+    const resp = await client.listInstances(new ListInstancesRequest({ regionId, pageNumber, pageSize: 100 }));
+    return { items: resp?.body?.instances || [], totalCount: resp?.body?.totalCount };
+  });
   return instances.map(inst => ({
     product: 'swas-open',
     instanceId: inst.instanceId,
@@ -69,18 +86,27 @@ async function listSwasInstances({ credential, regionId }) {
   }));
 }
 
+/**
+ * 跨地域列出 ECS + SWAS 机器。
+ * 返回 { machines, failures }：单个地域/产品列举失败不影响其余，但要如实报出来——
+ * 否则权限被收回、或所有地域都挂的时候，调用方看到的是"0 台机器、0 失败"，
+ * 会把一轮完全没对账的运行当成成功。
+ */
 async function listMachines({ credential, regions, logger = NOOP_LOGGER }) {
+  const failures = [];
   const tasks = [];
   for (const regionId of regions) {
     for (const [ product, list ] of [ [ 'ecs', listEcsInstances ], [ 'swas-open', listSwasInstances ] ]) {
-      // 单个地域/产品失败只记 warn，其余继续；warn 里带上是谁失败了，不然十个地域的 403 长得一模一样
       tasks.push(list({ credential, regionId }).catch(err => {
-        logger.warn(`[machine-firewall] Failed to list ${product} instances in ${regionId}:`, err?.message || err);
+        const message = err?.message || String(err);
+        logger.warn(`[machine-firewall] Failed to list ${product} instances in ${regionId}:`, message);
+        failures.push({ product, regionId, message });
         return [];
       }));
     }
   }
-  return (await Promise.all(tasks)).flat();
+  const machines = (await Promise.all(tasks)).flat();
+  return { machines, failures };
 }
 
 function clientFor(credential, machine) {
@@ -89,7 +115,6 @@ function clientFor(credential, machine) {
     : swasClient(credential, machine.regionId);
 }
 
-// client 可选：addIpRules / cleanupRules 会把自己的 client 传进来，一次操作只建一个 client
 async function listMachineRules({ credential, machine, client = clientFor(credential, machine) }) {
   if (machine.product === 'ecs') {
     return listSecurityGroupRules({
@@ -228,6 +253,7 @@ async function cleanupRules({ credential, machine, shouldDelete, rules = null, l
 
 module.exports = {
   FIELDS,
+  collectPages,
   listMachines,
   listEcsInstances,
   listSwasInstances,

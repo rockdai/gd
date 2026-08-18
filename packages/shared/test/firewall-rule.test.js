@@ -182,6 +182,11 @@ describe('firewall-rule helpers', () => {
     // 前缀相同但 label 更长，不能误判
     assert.strictEqual(isManagedJobRemark('gd-job:home2@2026-08-18 09:00:00', 'home'), false);
 
+    // 只认精确形态 gd-job:<label>@<时间戳>：多一个 @ 或缺时间戳都不是我们生成的
+    assert.strictEqual(isManagedJobRemark('gd-job:home@note@2026-08-18 09:00:00', 'home'), false);
+    assert.strictEqual(isManagedJobRemark('gd-job:home', 'home'), false);
+    assert.strictEqual(isManagedJobRemark('gd-job:home@invalid', 'home'), false);
+
     // 不认其他模块的规则
     assert.strictEqual(isManagedJobRemark('gd-web@2026-08-18 09:00:00', 'home'), false);
     assert.strictEqual(isManagedJobRemark('gd-cli:home@2026-08-18 09:00:00', 'home'), false);

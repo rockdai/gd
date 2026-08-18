@@ -36,7 +36,8 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
     async describeInstances(req) {
       const fixture = (instances[req.regionId] || {}).ecs || [];
       if (fixture instanceof Error) throw fixture;
-      return { body: { instances: { instance: fixture.map(i => ({ ...i })) } } };
+      const page = paginate(fixture, req);
+      return { body: { instances: { instance: page.items }, totalCount: page.totalCount, pageNumber: req.pageNumber, pageSize: req.pageSize } };
     }
     async describeSecurityGroupAttribute(req) {
       this.listCalls.push(req);
@@ -56,7 +57,8 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
     async listInstances(req) {
       const fixture = (instances[req.regionId] || {}).swas || [];
       if (fixture instanceof Error) throw fixture;
-      return { body: { instances: fixture.map(i => ({ ...i })) } };
+      const page = paginate(fixture, req);
+      return { body: { instances: page.items, totalCount: page.totalCount, pageNumber: req.pageNumber, pageSize: req.pageSize } };
     }
     async createFirewallRules(req) {
       this.createCalls.push(req);
@@ -113,6 +115,16 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
 
   return { machineFirewall, ecsClients, swasClients, restore };
 }
+
+// 假 SDK 的分页：按 req.pageNumber / req.pageSize 切片，返回 totalCount
+function paginate(all, req) {
+  const size = req.pageSize || 100;
+  const start = ((req.pageNumber || 1) - 1) * size;
+  return { items: all.slice(start, start + size).map(i => ({ ...i })), totalCount: all.length };
+}
+
+// collectPages 是纯函数，直接从真实模块拿（不需要 SDK 打桩）
+const machineFirewallStatic = require('../src/machine-firewall');
 
 const CREDENTIAL = { accessKeyId: 'ak', accessKeySecret: 'sk' };
 const ECS_MACHINE = { product: 'ecs', instanceId: 'i-1', regionId: 'cn-hangzhou', securityGroupId: 'sg-1' };
@@ -375,7 +387,7 @@ describe('machine-firewall listMachines', () => {
     });
     const warnings = [];
     try {
-      const machines = await machineFirewall.listMachines({
+      const { machines, failures } = await machineFirewall.listMachines({
         credential: CREDENTIAL,
         regions: [ 'cn-hangzhou', 'cn-hongkong' ],
         logger: { info() {}, warn: (...args) => warnings.push(args.join(' ')), error() {} },
@@ -385,9 +397,44 @@ describe('machine-firewall listMachines', () => {
         [ 'ecs/cn-hangzhou/i-1', 'swas-open/cn-hongkong/swas-1' ]
       );
       assert.deepStrictEqual(machines[0].securityGroupIds, [ 'sg-1' ]);
-      // 一条 warn，且说清了是哪个产品、哪个地域
+      // 一条 warn，且说清了是哪个产品、哪个地域；同时如实返回给调用方
       assert.strictEqual(warnings.length, 1);
       assert.ok(warnings[0].includes('swas-open') && warnings[0].includes('cn-hangzhou') && warnings[0].includes('NoPermission'));
+      assert.deepStrictEqual(failures.map(f => `${f.product}/${f.regionId}`), [ 'swas-open/cn-hangzhou' ]);
+      assert.ok(failures[0].message.includes('NoPermission'));
     } finally { restore(); }
+  });
+
+  it('follows pageNumber until every instance is collected', async () => {
+    // 模拟 cn-hangzhou 有 250 台 ECS：三页 100/100/50；SWAS 有 100 台整：一页满、第二页空
+    const ecsAll = Array.from({ length: 250 }, (_, i) => ({ instanceId: `i-${i}` }));
+    const swasAll = Array.from({ length: 100 }, (_, i) => ({ instanceId: `swas-${i}` }));
+    const { machineFirewall, restore } = loadMachineFirewallWithMocks({
+      instances: { 'cn-hangzhou': { ecs: ecsAll, swas: swasAll } },
+    });
+    try {
+      const { machines, failures } = await machineFirewall.listMachines({ credential: CREDENTIAL, regions: [ 'cn-hangzhou' ] });
+      assert.strictEqual(failures.length, 0);
+      assert.strictEqual(machines.filter(m => m.product === 'ecs').length, 250);
+      assert.strictEqual(machines.filter(m => m.product === 'swas-open').length, 100);
+      assert.strictEqual(machines[249].instanceId, 'i-249');
+    } finally { restore(); }
+  });
+
+  it('collectPages stops on a short page, on totalCount, and never loops on an empty first page', async () => {
+    const calls = [];
+    const pageOf = (total, size) => async n => { calls.push(n); const items = Array.from({ length: Math.max(0, Math.min(size, total - (n - 1) * size)) }, (_, i) => (n - 1) * size + i); return { items, totalCount: total }; };
+    assert.strictEqual((await machineFirewallStatic.collectPages(pageOf(250, 100), 100)).length, 250);
+    assert.deepStrictEqual(calls, [ 1, 2, 3 ]);
+    calls.length = 0;
+    assert.strictEqual((await machineFirewallStatic.collectPages(pageOf(200, 100), 100)).length, 200);
+    assert.deepStrictEqual(calls, [ 1, 2 ]); // 200 整：靠 totalCount 停，不多请求第三页
+    calls.length = 0;
+    assert.strictEqual((await machineFirewallStatic.collectPages(pageOf(0, 100), 100)).length, 0);
+    assert.deepStrictEqual(calls, [ 1 ]);
+    calls.length = 0;
+    // 没有 totalCount 的接口：只能靠"短页"停
+    const noTotal = async n => ({ items: n < 3 ? Array(100).fill(0) : Array(7).fill(0) });
+    assert.strictEqual((await machineFirewallStatic.collectPages(noTotal, 100)).length, 207);
   });
 });

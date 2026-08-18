@@ -31,7 +31,7 @@ const FOREIGN_RULES = [
 function makeDeps(overrides = {}) {
   return {
     async getPublicIp() { return '1.2.3.4'; },
-    async listMachines() { return [ SWAS ]; },
+    async listMachines() { return { machines: [ SWAS ], failures: [] }; },
     async listMachineRules() { return []; },
     async addIpRules() { return ADDED_BOTH; },
     async cleanupRules() { return { deletedCount: 0 }; },
@@ -172,6 +172,25 @@ describe('job sync runOnce', () => {
     assert.strictEqual(result.failures, 1);
   });
 
+  it('counts instance-discovery failures so a blind round is not reported as ok', async () => {
+    const { lines, logger } = captureLogger();
+    const result = await runOnce({
+      config: CONFIG, logger,
+      deps: makeDeps({
+        async listMachines() {
+          return { machines: [], failures: [
+            { product: 'ecs', regionId: 'cn-hangzhou', message: 'Forbidden.RAM: code: 403' },
+            { product: 'swas-open', regionId: 'cn-hangzhou', message: 'NoPermission: code: 403' },
+          ] };
+        },
+      }),
+    });
+    assert.strictEqual(result.targets, 0);
+    assert.strictEqual(result.failures, 2);
+    assert.strictEqual(result.ok, false);
+    assert.ok(lines.info.some(line => line.includes('0 machine(s)') && line.includes('2 failed')));
+  });
+
   it('reports failure when any machine fails', async () => {
     const result = await runOnce({
       config: CONFIG, logger: SILENT,
@@ -215,7 +234,7 @@ describe('job sync runOnce', () => {
       config: CONFIG, logger: SILENT,
       deps: makeDeps({
         async getPublicIp() { throw new Error('offline'); },
-        async listMachines() { listed += 1; return [ SWAS ]; },
+        async listMachines() { listed += 1; return { machines: [ SWAS ], failures: [] }; },
       }),
     });
     assert.strictEqual(result.ok, false);
@@ -240,7 +259,7 @@ describe('job sync runOnce', () => {
     await runOnce({
       config: CONFIG, logger: SILENT,
       deps: makeDeps({
-        async listMachines() { return machines; },
+        async listMachines() { return { machines, failures: [] }; },
         async addIpRules(args) { seenGroup = args.machine.securityGroupId; return ADDED_BOTH; },
       }),
     });
