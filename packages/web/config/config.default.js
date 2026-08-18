@@ -2,6 +2,7 @@
 
 const path = require('path');
 const crypto = require('crypto');
+const { resolveRegions } = require('@gd/shared/src/regions');
 
 /**
  * @param {Egg.EggAppInfo} appInfo app info
@@ -70,19 +71,8 @@ module.exports = appInfo => {
   config.aliyun = {
     accessKeyId: process.env.ACCESS_KEY_ID || '',
     accessKeySecret: process.env.ACCESS_KEY_SECRET || '',
-    // Common regions to scan for instances
-    regions: [
-      'cn-hangzhou',
-      'cn-shanghai',
-      'cn-beijing',
-      'cn-shenzhen',
-      'cn-hongkong',
-      'ap-northeast-1',
-      'ap-southeast-1',
-      'us-west-1',
-      'us-east-1',
-      'eu-central-1',
-    ],
+    // Common regions to scan for instances（默认值在 @gd/shared/src/regions.js，可用 REGIONS 覆盖）
+    regions: resolveRegions(),
   };
 
   // AMap Web Service API key for server-side IP geolocation lookup.

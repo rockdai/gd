@@ -13,8 +13,9 @@ function extractIpv4(text) {
   return ip;
 }
 
-async function getPublicIp() {
-  const resp = await fetch(IP_ENDPOINT, { headers: { accept: 'text/plain' } });
+async function getPublicIp({ endpoint } = {}) {
+  const target = endpoint || process.env.IP_ENDPOINT || IP_ENDPOINT;
+  const resp = await fetch(target, { headers: { accept: 'text/plain' } });
   if (!resp.ok) throw new Error(`Failed to fetch public ip: ${resp.status}`);
   const text = await resp.text();
   const ip = extractIpv4(text);
