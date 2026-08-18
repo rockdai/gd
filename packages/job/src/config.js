@@ -45,7 +45,7 @@ function loadConfig(env = process.env) {
     allow: parseList(env.MACHINE_ALLOW),
     deny: parseList(env.MACHINE_DENY),
     intervalSeconds: parseInterval(env.SYNC_INTERVAL),
-    regions: resolveRegions(env.REGIONS),
+    regions: resolveRegions(env.REGIONS ?? ''),
     label,
     ipEndpoint: env.IP_ENDPOINT || undefined,
   };

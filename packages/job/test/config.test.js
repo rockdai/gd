@@ -57,6 +57,17 @@ describe('job config loadConfig', () => {
     assert.strictEqual(config.ipEndpoint, undefined);
   });
 
+  it('does not read process.env.REGIONS when the given env lacks it', () => {
+    const previous = process.env.REGIONS;
+    try {
+      process.env.REGIONS = 'us-west-1';
+      assert.deepStrictEqual(loadConfig(BASE_ENV).regions, DEFAULT_REGIONS);
+    } finally {
+      if (previous === undefined) delete process.env.REGIONS;
+      else process.env.REGIONS = previous;
+    }
+  });
+
   it('reads every documented variable', () => {
     const config = loadConfig({
       ...BASE_ENV,
