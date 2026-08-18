@@ -418,12 +418,14 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
   const ecsSdkPath = require.resolve('@alicloud/ecs20140526');
   const swasSdkPath = require.resolve('@alicloud/swas-open20200601');
   const swasFirewallPath = require.resolve('../src/swas-firewall');
+  const ecsFirewallPath = require.resolve('../src/ecs-firewall');
 
   const previousCache = new Map([
     [ modulePath, require.cache[modulePath] ],
     [ ecsSdkPath, require.cache[ecsSdkPath] ],
     [ swasSdkPath, require.cache[swasSdkPath] ],
     [ swasFirewallPath, require.cache[swasFirewallPath] ],
+    [ ecsFirewallPath, require.cache[ecsFirewallPath] ],
   ]);
 
   const ecsClients = [];
@@ -464,6 +466,9 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
     exports: {
       default: FakeECSClient,
       DescribeInstancesRequest: BaseRequest,
+      // ecs-firewall.js 在模块加载时解构这个类；漏掉它会让 ECS 列举抛 TypeError，
+      // 被 fail-closed 吞成 error 状态，用例会以错误的原因失败
+      DescribeSecurityGroupAttributeRequest: BaseRequest,
       AuthorizeSecurityGroupRequest: BaseRequest,
       RevokeSecurityGroupRequest: BaseRequest,
     },
@@ -487,6 +492,9 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
     },
   };
 
+  // 强制 ecs-firewall 与被测模块一起重新加载，确保它们绑定到上面的假 SDK，
+  // 不受同一 mocha 进程里其他测试文件加载顺序的影响
+  delete require.cache[ecsFirewallPath];
   delete require.cache[modulePath];
   const machineFirewall = require('../src/machine-firewall');
 
@@ -520,6 +528,24 @@ describe('machine-firewall addIpRules', () => {
       assert.strictEqual(result.status, 'success');
       assert.strictEqual(result.message, 'TCP: already exists, UDP: already exists');
       assert.strictEqual(ecsClients[0].authorizeCalls.length, 0);
+    } finally { restore(); }
+  });
+
+  it('does not create SWAS rules when a manual rule already covers the IP', async () => {
+    const { machineFirewall, swasClients, restore } = loadMachineFirewallWithMocks({
+      swasRules: [
+        { ruleProtocol: 'TCP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: '云谷园区', ruleId: 'm-1' },
+        { ruleProtocol: 'UDP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: '云谷园区', ruleId: 'm-2' },
+      ],
+    });
+    try {
+      const result = await machineFirewall.addIpRules({
+        credential: CREDENTIAL, machine: SWAS_MACHINE,
+        sourceCidrIp: '1.2.3.4/32', remark: 'gd-job:home@2026-08-18 09:00:00',
+      });
+      assert.strictEqual(result.status, 'success');
+      assert.strictEqual(result.message, 'TCP: already exists, UDP: already exists');
+      assert.strictEqual(swasClients[0].createCalls.length, 0);
     } finally { restore(); }
   });
 
@@ -799,16 +825,23 @@ async function listMachines({ credential, regions, logger = NOOP_LOGGER }) {
   return machines;
 }
 
-async function listMachineRules({ credential, machine }) {
+function clientFor(credential, machine) {
+  return machine.product === 'ecs'
+    ? ecsClient(credential, machine.regionId)
+    : swasClient(credential, machine.regionId);
+}
+
+// client 可选：addIpRules / cleanupRules 会把自己的 client 传进来，一次操作只建一个 client
+async function listMachineRules({ credential, machine, client = clientFor(credential, machine) }) {
   if (machine.product === 'ecs') {
     return listSecurityGroupRules({
-      client: ecsClient(credential, machine.regionId),
+      client,
       securityGroupId: machine.securityGroupId,
       regionId: machine.regionId,
     });
   }
   return listAllFirewallRules({
-    client: swasClient(credential, machine.regionId),
+    client,
     instanceId: machine.instanceId,
     regionId: machine.regionId,
   });
@@ -831,10 +864,11 @@ async function addIpRules({ credential, machine, sourceCidrIp, remark, rules = n
   }
 
   const label = product === 'ecs' ? 'ECS' : 'SWAS';
+  const client = clientFor(credential, machine);
   let existingRules = rules;
   if (!existingRules) {
     try {
-      existingRules = await listMachineRules({ credential, machine });
+      existingRules = await listMachineRules({ credential, machine, client });
     } catch (err) {
       logger.error(`[machine-firewall] Failed to list ${label} rules for pre-check on ${instanceId}:`, err.message || err);
       return {
@@ -845,7 +879,6 @@ async function addIpRules({ credential, machine, sourceCidrIp, remark, rules = n
   }
 
   const fields = FIELDS[product];
-  const client = product === 'ecs' ? ecsClient(credential, regionId) : swasClient(credential, regionId);
   const protocolResults = [];
   let hasSuccess = false;
   let hasFailure = false;
@@ -903,7 +936,8 @@ async function cleanupRules({ credential, machine, shouldDelete, rules = null, l
   if (!FIELDS[product]) return { deletedCount: 0 };
 
   const fields = FIELDS[product];
-  const existingRules = rules || await listMachineRules({ credential, machine });
+  const client = clientFor(credential, machine);
+  const existingRules = rules || await listMachineRules({ credential, machine, client });
 
   // isOurManagedRemark 是 fail-closed 外层守卫：谓词再宽也不会碰到手工规则
   const staleRules = existingRules.filter(rule => {
@@ -917,11 +951,11 @@ async function cleanupRules({ credential, machine, shouldDelete, rules = null, l
   logger.info(`[machine-firewall] Cleaning up ${staleRuleIds.length} rule(s) on ${instanceId || securityGroupId}: ${staleRules.map(r => getRuleField(r, fields.remark)).join(', ')}`);
 
   if (product === 'ecs') {
-    await ecsClient(credential, regionId).revokeSecurityGroup(new RevokeSecurityGroupRequest({
+    await client.revokeSecurityGroup(new RevokeSecurityGroupRequest({
       regionId, securityGroupId, securityGroupRuleId: staleRuleIds,
     }));
   } else {
-    await swasClient(credential, regionId).deleteFirewallRules(new DeleteFirewallRulesRequest({
+    await client.deleteFirewallRules(new DeleteFirewallRulesRequest({
       instanceId, regionId, ruleIds: staleRuleIds,
     }));
   }
@@ -945,7 +979,7 @@ module.exports = {
 npm test -w @gd/shared
 ```
 
-预期：PASS，新增 12 个用例。
+预期：PASS，新增 13 个用例。
 
 - [ ] **Step 5: 运行全部测试**
 
@@ -1053,6 +1087,9 @@ class AliyunService extends Service {
         continue;
       }
       try {
+        // web 是先清后加，且两步各自列举规则。绝不能像 job 那样把一份列举结果传给 addIpRules 的 rules 参数：
+        // 清理若删掉了一条与当前 IP 相同的过期 gd-web 规则，过期的列举结果仍会让预检误判"已存在"而不再新增，
+        // 该 IP 就会失去访问。
         const cleanup = await this._tryCleanupExpiredWebRules(credential, machine);
         const result = await addIpRules({ credential, machine, sourceCidrIp, remark, logger: this.logger });
         result.message = this._appendCleanupMessage(result.message, cleanup);
@@ -1117,6 +1154,8 @@ module.exports = AliyunService;
 保留：
 - `treats cleanup errors as best-effort failures`（`_tryCleanupExpiredWebRules` 的降级语义）
 - `appends cleanup outcome to the result message`（`_appendCleanupMessage` 文案）
+
+同时删除文件顶部不再被引用的 `const { PORT_RANGE } = require('@gd/shared/src/firewall-rule');`。
 
 保留的第一个用例需改写为不依赖 SDK 打桩：
 
@@ -1585,23 +1624,32 @@ function makeDeps(overrides = {}) {
 describe('job sync buildStaleRulePredicate', () => {
   it('selects own-label rules whose source IP differs from the current one', () => {
     const predicate = buildStaleRulePredicate({ label: 'home', sourceCidrIp: '1.2.3.4/32', product: 'swas-open' });
+    const rule = (remark, sourceCidrIp) => ({ ruleProtocol: 'TCP', port: PORT_RANGE, remark, sourceCidrIp });
 
     // 旧 IP 的自有规则 → 删
-    assert.strictEqual(predicate({ remark: 'gd-job:home@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), true);
+    assert.strictEqual(predicate(rule('gd-job:home@2026-08-17 09:00:00', '5.6.7.8/32')), true);
     // 当前 IP 的自有规则 → 留，哪怕时间戳很旧（DDNS 语义，不看时间）
-    assert.strictEqual(predicate({ remark: 'gd-job:home@2020-01-01 00:00:00', sourceCidrIp: '1.2.3.4/32' }), false);
+    assert.strictEqual(predicate(rule('gd-job:home@2020-01-01 00:00:00', '1.2.3.4/32')), false);
     // 别的 label → 不碰
-    assert.strictEqual(predicate({ remark: 'gd-job:office@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), false);
+    assert.strictEqual(predicate(rule('gd-job:office@2026-08-17 09:00:00', '5.6.7.8/32')), false);
     // 别的模块 → 不碰
-    assert.strictEqual(predicate({ remark: 'gd-web@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), false);
-    assert.strictEqual(predicate({ remark: 'gd-ddns:x.dev@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), false);
+    assert.strictEqual(predicate(rule('gd-web@2026-08-17 09:00:00', '5.6.7.8/32')), false);
+    assert.strictEqual(predicate(rule('gd-ddns:x.dev@2026-08-17 09:00:00', '5.6.7.8/32')), false);
     // 手工规则 → 不碰
-    assert.strictEqual(predicate({ remark: '云谷园区', sourceCidrIp: '5.6.7.8/32' }), false);
+    assert.strictEqual(predicate(rule('云谷园区', '5.6.7.8/32')), false);
+  });
+
+  it('ignores rules whose protocol or port is not the managed shape', () => {
+    // 与 web 的 isExpiredWebRule 一致：只认 TCP/UDP + 1/65535 的规则
+    const predicate = buildStaleRulePredicate({ label: 'home', sourceCidrIp: '1.2.3.4/32', product: 'swas-open' });
+    assert.strictEqual(predicate({ ruleProtocol: 'TCP', port: '22/22', remark: 'gd-job:home@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), false);
+    assert.strictEqual(predicate({ ruleProtocol: 'ICMP', port: PORT_RANGE, remark: 'gd-job:home@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), false);
+    assert.strictEqual(predicate({ ruleProtocol: 'tcp', port: PORT_RANGE, remark: 'gd-job:home@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), true);
   });
 
   it('reads the description field for ECS rules', () => {
     const predicate = buildStaleRulePredicate({ label: 'home', sourceCidrIp: '1.2.3.4/32', product: 'ecs' });
-    assert.strictEqual(predicate({ description: 'gd-job:home@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), true);
+    assert.strictEqual(predicate({ ipProtocol: 'TCP', portRange: PORT_RANGE, description: 'gd-job:home@2026-08-17 09:00:00', sourceCidrIp: '5.6.7.8/32' }), true);
   });
 });
 
@@ -1649,6 +1697,22 @@ describe('job sync runOnce', () => {
     assert.strictEqual(listCalls, 1);
     assert.strictEqual(seen[0], rules);
     assert.strictEqual(seen[1], rules);
+  });
+
+  it('keeps stale rules when only some protocols were added', async () => {
+    let cleaned = 0;
+    const state = { lastIp: null };
+    const result = await runOnce({
+      config: CONFIG, state, logger: SILENT,
+      deps: makeDeps({
+        async addIpRules() { return { status: 'partial', message: 'TCP: added, UDP: failed (boom)' }; },
+        async cleanupRules() { cleaned += 1; return { deletedCount: 1 }; },
+      }),
+    });
+    // 新访问没完全到位前不撤旧访问；不记 lastIp，下一轮补齐后再清
+    assert.strictEqual(cleaned, 0);
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(state.lastIp, null);
   });
 
   it('does not record lastIp when any machine fails', async () => {
@@ -1736,8 +1800,11 @@ npm test -w @gd/job
 'use strict';
 
 const {
+  PORT_RANGE,
+  RULE_PROTOCOLS,
   toSourceCidrIp,
   normalizeIpForCompare,
+  normalizeProtocol,
   getRuleField,
   buildManagedJobRemark,
   isManagedJobRemark,
@@ -1746,7 +1813,11 @@ const machineFirewall = require('@gd/shared/src/machine-firewall');
 const { getPublicIp } = require('@gd/shared/src/public-ip');
 const { selectMachines, findMissingEntries, withSecurityGroup } = require('./machines');
 
-const REMARK_FIELD = { ecs: 'description', 'swas-open': 'remark' };
+// 两种 product 的规则字段名差异
+const RULE_FIELDS = {
+  ecs: { protocol: 'ipProtocol', port: 'portRange', remark: 'description' },
+  'swas-open': { protocol: 'ruleProtocol', port: 'port', remark: 'remark' },
+};
 
 const DEFAULT_DEPS = {
   getPublicIp,
@@ -1761,10 +1832,13 @@ const DEFAULT_DEPS = {
  * 与时间无关：IP 没变时规则就该一直留着，按 TTL 删会把自己关在门外。
  */
 function buildStaleRulePredicate({ label, sourceCidrIp, product }) {
-  const remarkField = REMARK_FIELD[product];
+  const fields = RULE_FIELDS[product];
   const currentIp = normalizeIpForCompare(sourceCidrIp);
   return rule => {
-    const remark = getRuleField(rule, remarkField) || '';
+    // 与 web 的 isExpiredWebRule 同构：协议、端口、备注前缀三者都要命中，再看 IP
+    if (!RULE_PROTOCOLS.includes(normalizeProtocol(getRuleField(rule, fields.protocol)))) return false;
+    if (getRuleField(rule, fields.port) !== PORT_RANGE) return false;
+    const remark = getRuleField(rule, fields.remark) || '';
     if (!isManagedJobRemark(remark, label)) return false;
     return normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) !== currentIp;
   };
@@ -1822,11 +1896,13 @@ async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console })
       continue;
     }
     if (added.status === 'partial') {
-      logger.warn(`[gd-job] ${name}: ${added.message}`);
+      // 新 IP 只有一个协议放通了，旧规则先留着：新访问没完全到位前不撤旧访问。
+      // failures > 0 会让 lastIp 不被记录，下一轮会重试缺的协议并完成清理。
+      logger.warn(`[gd-job] ${name}: ${added.message}; keeping stale rules until all protocols succeed`);
       summary.failures += 1;
-    } else {
-      logger.info(`[gd-job] ${name}: ${added.message}`);
+      continue;
     }
+    logger.info(`[gd-job] ${name}: ${added.message}`);
     summary.added += 1;
 
     try {
@@ -1913,28 +1989,29 @@ async function main() {
   if (config.allow.length) console.log(`[gd-job] allow: ${config.allow.join(', ')}`);
   if (config.deny.length) console.log(`[gd-job] deny: ${config.deny.join(', ')}`);
 
-  const state = { lastIp: null };
-  let stopping = false;
+  // 容器里 Node 是 PID 1，内核不给 PID 1 施加默认信号处置——不注册 handler 的话
+  // `docker stop` 发的 SIGTERM 会被无视，10 秒后被 SIGKILL。
+  // 直接退出是安全的：每次 API 调用都是原子的，lastIp 只在内存里、本来就应随重启丢失，
+  // 中途打断的一轮下次启动会完整重做。
   for (const signal of [ 'SIGINT', 'SIGTERM' ]) {
     process.on(signal, () => {
-      console.log(`[gd-job] received ${signal}, exiting after the current round`);
-      stopping = true;
+      console.log(`[gd-job] received ${signal}, exiting`);
+      process.exit(0);
     });
   }
 
+  const state = { lastIp: null };
+
   // 启动即同步一次，不等第一个间隔：NAS 重启后要尽快恢复访问
-  while (!stopping) {
+  for (;;) {
     try {
       await runOnce({ config, state, logger: console });
     } catch (err) {
       // 兜底：任何未预期的异常都不该让容器退出，下一轮继续重试
       console.error('[gd-job] unexpected error in sync round:', err);
     }
-    if (stopping) break;
     await sleep(config.intervalSeconds * 1000);
   }
-
-  process.exit(0);
 }
 
 main();
@@ -1964,7 +2041,9 @@ IP_ENDPOINT=http://127.0.0.1:9 \
 timeout 5 node packages/job/bin/gd-job.js; echo "exit=$?"
 ```
 
-预期：打印 `[gd-job] started: ...` 和一行 `failed to fetch public ip`，进程保持运行直到 `timeout` 杀掉（`exit=124`）。取 IP 失败不得导致进程退出。
+预期：打印 `[gd-job] started: ...` 和一行 `failed to fetch public ip`，然后进程一直活着，直到 5 秒后 `timeout` 发出 SIGTERM，程序打印 `received SIGTERM, exiting` 并以 0 退出（`exit=0`）。
+
+这一步同时验证两件事：取 IP 失败不会让进程退出；SIGTERM 能立刻结束进程（`docker stop` 依赖这一点）。若看到 `exit=124`，说明 SIGTERM handler 没生效。
 
 - [ ] **Step 5: 提交**
 
@@ -1996,21 +2075,28 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# 先只拷贝清单，让依赖层能被缓存
+# 先只拷贝清单，让依赖层能被缓存。
+# 五个 workspace 的 package.json 一个都不能少，也不要加 --workspace 过滤：
+# npm 10 在这两种情况下装出来的树都是坏的（@alicloud/credentials 链上的 debug 会丢，
+# require('@alicloud/ecs20140526') 直接 Cannot find module 'debug'）。已在 npm 10.9.4 上实测。
+# 全量 --omit=dev 只多装 egg 相关约 3.6MB，不值得为此冒险。
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/
+COPY packages/web/package.json ./packages/web/
+COPY packages/scheduler/package.json ./packages/scheduler/
+COPY packages/cli/package.json ./packages/cli/
 COPY packages/job/package.json ./packages/job/
 
-# 只装 job 及其依赖链需要的东西，跳过 web / scheduler / cli
-RUN npm ci --omit=dev --workspace @gd/job --include-workspace-root
+RUN npm ci --omit=dev
 
+# 只拷 job 真正会 require 到的两个包的源码；web / scheduler / cli 只留上面的清单
 COPY packages/shared ./packages/shared
 COPY packages/job ./packages/job
 
-ENV NODE_ENV=production
-
 CMD ["node", "packages/job/bin/gd-job.js"]
 ```
+
+`npm ci` 时 `packages/job/bin/gd-job.js` 尚未拷入，npm 对缺失的 bin 目标是容忍的（根清单的 `bin/ecs-dsec-handler.js` 同样缺失，实测通过），不必调整 COPY 顺序去迁就它。
 
 - [ ] **Step 2: 写 .dockerignore**
 
@@ -2068,15 +2154,32 @@ services:
       # IP_ENDPOINT: "https://get-ip.rockdai.com"
 ```
 
-- [ ] **Step 4: 构建镜像**
+- [ ] **Step 4: 无 Docker 环境下的等价验证（必做）**
+
+开发机上未必装了 Docker（当前这台 Mac 就没有）。先在临时目录里逐条模拟 Dockerfile 的 COPY 与 RUN，把依赖安装这一最容易出错的环节验证掉：
+
+```bash
+S=$(mktemp -d)
+cp package.json package-lock.json "$S/"
+for p in shared web scheduler cli job; do mkdir -p "$S/packages/$p" && cp "packages/$p/package.json" "$S/packages/$p/"; done
+(cd "$S" && npm ci --omit=dev --no-audit --no-fund 2>&1 | grep -E "added|ERR")
+cp -R packages/shared/. "$S/packages/shared/" && cp -R packages/job/. "$S/packages/job/"
+(cd "$S" && node -e "require('./packages/job/src/sync'); console.log('✅ 依赖树完整，@gd/shared 与 @alicloud/* 可加载')")
+(cd "$S" && node packages/job/bin/gd-job.js; echo "exit=$?")
+rm -rf "$S"
+```
+
+预期：`added 4xx packages`；`✅ 依赖树完整…`；最后一条打印 `invalid configuration: ACCESS_KEY_ID is required` 且 `exit=1`。若出现 `Cannot find module 'debug'`，说明 Dockerfile 的 COPY 清单或 `npm ci` 参数被改动过，回到 Step 1 对照。
+
+- [ ] **Step 5: 构建镜像（有 Docker 的机器上）**
 
 ```bash
 docker build -f packages/job/Dockerfile -t gd-job .
 ```
 
-预期：构建成功。
+预期：构建成功。**若本机没有 Docker，把 Step 5–7 记入 PR 描述的「合并前待验证」清单，在 NAS 或任何有 Docker 的机器上补跑一次再合并。**
 
-- [ ] **Step 5: 验证镜像能起来且配置校验生效**
+- [ ] **Step 6: 验证镜像能起来且配置校验生效**
 
 ```bash
 docker run --rm gd-job; echo "exit=$?"
@@ -2094,7 +2197,14 @@ docker run --rm -e ACCESS_KEY_ID=fake -e ACCESS_KEY_SECRET=fake \
 
 预期：打印成功信息，无 `Cannot find module`。
 
-- [ ] **Step 6: 确认凭据文件没进镜像**
+再验证 `TZ` 在 alpine 镜像里生效（规则备注的时间戳依赖它；Node 自带 ICU 时区数据，不需要装 tzdata，此步是确认而非修复）：
+
+```bash
+docker run --rm -e TZ=Asia/Shanghai gd-job \
+  node -e "const d=new Date('2026-08-18T00:00:00Z'); console.log(d.getHours()===8 ? '✅ TZ 生效，UTC 0 点显示为 8 点' : '❌ TZ 未生效: '+d.getHours())"
+```
+
+- [ ] **Step 7: 确认凭据文件没进镜像**
 
 ```bash
 docker run --rm gd-job sh -c "ls -a /app | grep aliyun || echo '✅ 镜像内无 .aliyun.conf'"
@@ -2102,7 +2212,7 @@ docker run --rm gd-job sh -c "ls -a /app | grep aliyun || echo '✅ 镜像内无
 
 预期：`✅ 镜像内无 .aliyun.conf`。
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 8: 提交**
 
 ```bash
 git add packages/job/Dockerfile packages/job/docker-compose.example.yml .dockerignore

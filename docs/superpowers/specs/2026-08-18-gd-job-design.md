@@ -64,6 +64,7 @@
   listMachines({ credential, regions, logger })
   listEcsInstances({ credential, regionId })
   listSwasInstances({ credential, regionId })
+  listMachineRules({ credential, machine, client? })
   addIpRules({ credential, machine, sourceCidrIp, remark, rules, logger })
   cleanupRules({ credential, machine, shouldDelete, rules, logger })
 
@@ -114,7 +115,9 @@ packages/job/
       rules ← 列出该机器现有规则     ← 一次调用，供 a 和 b 共用
         失败 → 该机器标记失败，跳到下一台（fail-closed，不加不删）
       a. 加：TCP / UDP 中缺少 (协议, 1/65535, 当前IP) 的，创建 gd-job:<label>@<now>
-      b. 清：rules 中 isManagedJobRemark(remark, label) 且 源IP ≠ 当前IP 的，批量删除
+           只放通了部分协议 → 该机器标记失败，跳过 b（新访问没完全到位前不撤旧访问）
+      b. 清：rules 中 协议∈{TCP,UDP} 且 端口=1/65535 且 isManagedJobRemark(remark, label)
+           且 源IP ≠ 当前IP 的，批量删除
 6. 所有 target 均成功 → lastIp = ip
    有任一失败       → 不更新 lastIp，下一轮重试
 ```
@@ -213,6 +216,8 @@ ECS 挂载多个安全组时，只操作 `[...securityGroupIds].sort()[0]`，与
 | 某地域列举机器失败 | warn，该地域机器视为不存在，其余地域继续（`Promise.allSettled`，与 web 一致） |
 | 某机器列举规则失败 | error，该机器既不加也不删（fail-closed，与 web 一致），标记本轮有失败 |
 | 某机器新增规则失败 | error，继续处理下一台，标记本轮有失败 |
+| 某机器只放通了部分协议 | warn，跳过该机器本轮的清理（旧规则先留着），标记本轮有失败，下一轮补齐后再清 |
+| 收到 SIGTERM / SIGINT | 立即退出。容器里 Node 是 PID 1，必须显式注册 handler，否则 `docker stop` 会等到超时后 SIGKILL。立即退出是安全的：每次 API 调用都是原子的，`lastIp` 本就应随重启丢失 |
 | 某机器删除旧规则失败 | error，继续处理下一台，标记本轮有失败 |
 | 配置校验失败（缺 AK/SK、间隔非法） | 启动时立即退出并打印原因 |
 
@@ -222,6 +227,8 @@ ECS 挂载多个安全组时，只操作 `[...securityGroupIds].sort()[0]`，与
 
 `Dockerfile` 基于 `node:20-alpine`，在仓库根执行 `npm ci --omit=dev`，入口 `node packages/job/bin/gd-job.js`。workspace symlink 在同一镜像层内可正常解析，不存在 FC 部署时那种打包丢失问题，因此不需要 `scripts/materialize-workspace-deps.sh`。
 
+两条经实测（npm 10.9.4）得出的硬约束：`npm ci` 之前必须把五个 workspace 的 `package.json` 全部拷入构建上下文，且不能加 `--workspace` 过滤。缺任一 workspace 清单或使用过滤安装，npm 装出的依赖树都是残缺的——`@alicloud/credentials` 依赖链上的 `debug` 会丢失，`require('@alicloud/ecs20140526')` 直接失败。全量 `--omit=dev` 相比过滤安装只多出 egg 相关约 3.6MB（`node_modules` 共约 74MB，大头是 `@alicloud/*` 生成的客户端），不值得为省这点体积承担风险。
+
 `docker-compose.example.yml` 提供一份可直接改用的示例，含 `restart: unless-stopped` 和 `TZ=Asia/Shanghai`。
 
 README 增加「Docker 部署（NAS / Homelab）」一节。
@@ -230,13 +237,15 @@ README 增加「Docker 部署（NAS / Homelab）」一节。
 
 沿用现有 `egg-bin test` + `assert`，不引入新框架。
 
-**`packages/shared/test/machine-firewall.test.js`**（从 web 迁移的 11 个用例）
+**`packages/shared/test/machine-firewall.test.js`**（从 web 迁移的 11 个用例 + 2 个针对 job 用法的新用例）
 - 手工规则已覆盖该 IP 时不重复授权（ECS / SWAS）
-- 同一 IP 重复提交不重复创建 SWAS 规则
+- 调用方传入 `rules` 时复用它、不再列举（同时覆盖了"同一 IP 重复提交不重复创建"）
 - 无规则覆盖时正常创建
 - 拒绝删除备注不符合托管格式的规则（ECS / SWAS）
 - 列举规则抛错时 fail-closed，拒绝新增（ECS / SWAS）
-- 确实删除命中谓词的规则
+- 确实删除命中谓词的规则；web 的 TTL 谓词仍能删除过期 `gd-web` 规则
+- 不同 label 的 `gd-job` 规则不会被删除
+- partial / error 状态判定
 
 **`packages/shared/test/firewall-rule.test.js`**（新增）
 - `buildManagedJobRemark` / `isManagedJobRemark` 的构造与匹配
@@ -251,7 +260,8 @@ README 增加「Docker 部署（NAS / Homelab）」一节。
 - 多安全组时选中排序后的第一个
 - IP 未变时跳过整轮
 - 上一轮有失败时不更新 `lastIp`，下一轮重新执行
-- 旧 IP 规则被识别为待删、当前 IP 规则被保留
+- 旧 IP 规则被识别为待删、当前 IP 规则被保留；协议或端口不是托管形态的规则不被识别（与 web 一致）
+- 只放通了部分协议时不清理旧规则，且不记录 `lastIp`
 - `SYNC_INTERVAL` 解析：`5m` / `30s` / `300` / 非法值
 - `REGIONS` 未设置时回落到 shared 默认列表，设置后按逗号切分并去除空白
 - `IP_ENDPOINT` 未设置时 `getPublicIp()` 仍请求内置常量地址
