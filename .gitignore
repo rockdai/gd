@@ -132,6 +132,9 @@ dist
 # Aliyun credentials (DO NOT COMMIT)
 .aliyun.conf
 
+# 用户按 README 从 docker-compose.example.yml 拷出并填了 AK/SK 的副本 (DO NOT COMMIT)
+docker-compose.yml
+
 # Egg.js
 run/
 logs/

@@ -121,7 +121,8 @@ s deploy --type code
 ## Docker 部署（NAS / Homelab）
 
 ```bash
-cp packages/job/docker-compose.example.yml docker-compose.yml
+cd packages/job
+cp docker-compose.example.yml docker-compose.yml
 # 编辑 docker-compose.yml 填入 AK/SK 和地域
 docker compose up -d
 docker compose logs -f gd-job
