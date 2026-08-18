@@ -1,0 +1,22 @@
+{
+  "name": "@gd/web",
+  "version": "1.0.0",
+  "private": true,
+  "egg": {
+    "framework": "egg"
+  },
+  "scripts": {
+    "dev":   "egg-bin dev",
+    "start": "EGG_SERVER_ENV=prod NODE_ENV=prod EGG_WORKERS=1 node bootstrap.js",
+    "test":  "egg-bin test",
+    "cov":   "egg-bin cov"
+  },
+  "dependencies": {
+    "@gd/shared": "*",
+    "@alicloud/ecs20140526": "6.1.0",
+    "@alicloud/swas-open20200601": "4.0.0",
+    "egg": "^3.34.0",
+    "jsonwebtoken": "^9.0.3",
+    "@simplewebauthn/server": "^13.3.0"
+  }
+}

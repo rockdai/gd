@@ -13,7 +13,7 @@ const {
   CreateFirewallRulesRequest,
   DeleteFirewallRulesRequest,
 } = require('@alicloud/swas-open20200601');
-const { resolveCredentials } = require('../../lib/aliyun-conf');
+const { resolveCredentials } = require('@gd/shared/src/aliyun-conf');
 const {
   PORT_RANGE,
   RULE_PROTOCOLS,
@@ -24,9 +24,9 @@ const {
   isExpiredWebRule,
   isOurManagedRemark,
   findRuleByProtocolPortSource,
-} = require('../../lib/firewall-rule');
-const { listAllFirewallRules } = require('../../lib/swas-firewall');
-const { listSecurityGroupRules } = require('../../lib/ecs-firewall');
+} = require('@gd/shared/src/firewall-rule');
+const { listAllFirewallRules } = require('@gd/shared/src/swas-firewall');
+const { listSecurityGroupRules } = require('@gd/shared/src/ecs-firewall');
 
 class AliyunService extends Service {
 

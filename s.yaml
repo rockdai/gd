@@ -7,11 +7,19 @@ vars:
 
 # 只部署代码，不更新函数配置。函数配置在阿里云控制台上管理。
 # 部署命令: s deploy --function code --assume-yes
+#
+# pre-deploy 钩子把 npm workspaces symlink 实体化到 node_modules/@gd/*，
+# 避免 Serverless Devs 打包对 symlink 处理不确定。详见
+# docs/superpowers/specs/2026-05-15-monorepo-restructure-design.md §7.3
 
 resources:
   # Web service (Egg.js PWA)
   gd-web:
     component: fc3
+    actions:
+      pre-deploy:
+        - run: bash scripts/materialize-workspace-deps.sh
+          path: ./
     props:
       region: ${vars.region}
       functionName: gd-web
@@ -20,6 +28,10 @@ resources:
   # 定时更新白名单（复用已有函数 ecs-dsec）
   ecs-dsec:
     component: fc3
+    actions:
+      pre-deploy:
+        - run: bash scripts/materialize-workspace-deps.sh
+          path: ./
     props:
       region: ${vars.region}
       functionName: ecs-dsec

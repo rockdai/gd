@@ -1,0 +1,11 @@
+{
+  "name": "@gd/cli",
+  "version": "1.0.0",
+  "private": true,
+  "bin": {
+    "ecs-dsec-handler": "bin/ecs-dsec-handler.js"
+  },
+  "dependencies": {
+    "@gd/shared": "*"
+  }
+}

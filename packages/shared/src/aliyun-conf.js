@@ -21,13 +21,23 @@ function parseKeyValue(text) {
 }
 
 function findRepoRoot(startDir) {
-  // Walk upwards looking for package.json
+  // Walk upwards. Prefer the first package.json that declares "workspaces"
+  // (monorepo root); fall back to the topmost package.json otherwise.
   let dir = startDir;
+  let lastPkgDir = null;
   while (true) {
     const p = path.join(dir, 'package.json');
-    if (fs.existsSync(p)) return dir;
+    if (fs.existsSync(p)) {
+      lastPkgDir = dir;
+      try {
+        const pkg = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (pkg && pkg.workspaces) return dir;
+      } catch (_) {
+        // ignore malformed package.json and keep walking up
+      }
+    }
     const parent = path.dirname(dir);
-    if (parent === dir) return startDir;
+    if (parent === dir) return lastPkgDir || startDir;
     dir = parent;
   }
 }

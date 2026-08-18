@@ -2,7 +2,7 @@
 
 const assert = require('assert');
 
-const { listAllFirewallRules } = require('../../lib/swas-firewall');
+const { listAllFirewallRules } = require('../src/swas-firewall');
 
 describe('swas-firewall helpers', () => {
   it('keeps paging when totalCount indicates more rules despite a short page', async () => {

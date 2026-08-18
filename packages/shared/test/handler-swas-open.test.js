@@ -2,8 +2,8 @@
 
 const assert = require('assert');
 
-const { PORT_RANGE } = require('../../lib/firewall-rule');
-const { __private__: { ensureSwasRuleForProtocol } } = require('../../lib/handler-swas-open');
+const { PORT_RANGE } = require('../src/firewall-rule');
+const { __private__: { ensureSwasRuleForProtocol } } = require('../src/handler-swas-open');
 
 function createClient() {
   return {

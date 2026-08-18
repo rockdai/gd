@@ -3,24 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "repository": "git@github.com:rockdai/gd.git",
-  "egg": {
-    "framework": "egg"
-  },
+  "workspaces": ["packages/*"],
   "bin": {
     "ecs-dsec-handler": "bin/ecs-dsec-handler.js"
   },
   "scripts": {
-    "dev": "egg-bin dev",
-    "start": "EGG_SERVER_ENV=prod NODE_ENV=prod EGG_WORKERS=1 node bootstrap.js",
-    "test": "egg-bin test",
-    "cov": "egg-bin cov"
-  },
-  "dependencies": {
-    "@alicloud/ecs20140526": "6.1.0",
-    "@alicloud/swas-open20200601": "4.0.0",
-    "@simplewebauthn/server": "^13.3.0",
-    "egg": "^3.34.0",
-    "jsonwebtoken": "^9.0.3"
+    "dev":   "npm run dev   -w @gd/web",
+    "start": "npm run start -w @gd/web",
+    "test":  "npm test --workspaces --if-present --include-workspace-root=false",
+    "cov":   "npm run cov --workspaces --if-present --include-workspace-root=false"
   },
   "devDependencies": {
     "egg-bin": "^6.13.0"

@@ -1,0 +1,13 @@
+{
+  "name": "@gd/shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "scripts": {
+    "test": "egg-bin test"
+  },
+  "dependencies": {
+    "@alicloud/ecs20140526": "6.1.0",
+    "@alicloud/swas-open20200601": "4.0.0"
+  }
+}
