@@ -14,6 +14,8 @@ describe('AliyunService cleanup handling', () => {
 
     assert.deepStrictEqual(cleanup, { deletedCount: 0, failed: true });
     assert.strictEqual(warnings.length, 1);
+    assert.match(warnings[0][0], /Failed to cleanup expired web rules/);
+    assert.strictEqual(warnings[0][1].message, 'boom');
   });
 
   it('appends cleanup outcome to the result message', () => {
