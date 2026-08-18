@@ -65,7 +65,7 @@ class AliyunService extends Service {
         const cleanup = await this._tryCleanupExpiredWebRules(credential, machine);
         const result = await addIpRules({ credential, machine, sourceCidrIp, remark, logger: this.logger });
         result.message = this._appendCleanupMessage(result.message, cleanup);
-        results.push({ ...machine, ...result });
+        results.push({ ...machine, status: result.status, message: result.message });
       } catch (err) {
         this.logger.error(`[aliyun] Failed to add IP for ${machine.product}/${machine.instanceId}:`, err);
         results.push({ ...machine, status: 'error', message: err.message });
