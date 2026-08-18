@@ -181,6 +181,18 @@ describe('job sync runOnce', () => {
     assert.strictEqual(result.failures, 1);
   });
 
+  it('counts a cleanup throw as a failure and keeps going', async () => {
+    const { lines, logger } = captureLogger();
+    const result = await runOnce({
+      config: CONFIG, logger,
+      deps: makeDeps({ async cleanupRules() { throw new Error('boom'); } }),
+    });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.failures, 1);
+    assert.strictEqual(result.added, 2);           // the add still counted
+    assert.ok(lines.error.some(line => line.includes('cleanup failed') && line.includes('boom')));
+  });
+
   it('fails closed for a machine whose rule listing throws', async () => {
     let added = 0;
     let cleaned = 0;
