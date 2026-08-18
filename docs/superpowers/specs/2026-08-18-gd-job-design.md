@@ -64,21 +64,23 @@
   listMachines({ credential, regions, logger })
   listEcsInstances({ credential, regionId })
   listSwasInstances({ credential, regionId })
-  addIpRules({ credential, machine, sourceCidrIp, remark, logger })
-  cleanupRules({ credential, machine, shouldDelete, logger })
+  addIpRules({ credential, machine, sourceCidrIp, remark, rules, logger })
+  cleanupRules({ credential, machine, shouldDelete, rules, logger })
 
 @gd/web app/service/aliyun.js        （变薄，保留 web 专属部分）
   getCredential()                    Egg 配置读取
   listMachines()                     委托 shared
-  addIpToWhitelist()                 委托 shared，传入 gd-web 前缀
+  addIpToWhitelist()                 编排：每台机器先清后加，合并消息
   _cleanupExpiredWebRules()          委托 shared，传入 gd-web + TTL 谓词
-  _buildProtocolOperationResult()    保留：web API 响应格式
-  _appendCleanupMessage()            保留：web API 响应格式
+  _tryCleanupExpiredWebRules()       保留：清理失败降级为 { deletedCount: 0, failed: true }
+  _appendCleanupMessage()            保留：web API 响应文案
 ```
+
+`addIpRules` / `cleanupRules` 的 `rules` 参数可选：不传则内部自行列举（web 的现有行为），传入则复用调用方已列举的结果（job 的一次列举供两步共用，见 §5.1）。
 
 `addIpRules` 与 `cleanupRules` 通过参数区分两个消费方：前者接收调用方构造好的 `remark` 字符串，后者接收 `shouldDelete(rule)` 谓词。web 传 `gd-web` + 24h TTL 谓词，job 传 `gd-job:<label>` + 源 IP 不等于当前 IP 的谓词。
 
-`packages/web/test/app/service/aliyun.test.js` 中直接调用 `_addIpToEcs` / `_addIpToSwas` / `_cleanupExpiredEcsRules` / `_cleanupExpiredSwasRules` 的 11 个用例，随代码迁移到 `packages/shared/test/machine-firewall.test.js`。迁移后这些用例同时保护 web 和 job 两个消费方，覆盖强于现状。留在 web 的是 `_appendCleanupMessage` / `_buildProtocolOperationResult` 的 3 个消息格式化用例。
+`packages/web/test/app/service/aliyun.test.js` 中直接调用 `_addIpToEcs` / `_addIpToSwas` / `_cleanupExpiredEcsRules` / `_cleanupExpiredSwasRules` 的 11 个用例，随代码迁移到 `packages/shared/test/machine-firewall.test.js`。迁移后这些用例同时保护 web 和 job 两个消费方，覆盖强于现状。留在 web 的是 `_tryCleanupExpiredWebRules` 尽力而为语义与 `_appendCleanupMessage` 消息拼装的 2 个用例（该文件共 13 个用例）。`_buildProtocolOperationResult` 随 `addIpRules` 一并迁入 shared，否则 fail-closed 的提示文案在 shared、partial/error 状态判定在 web，会被拆成两处。
 
 ### 4.2 包结构
 
