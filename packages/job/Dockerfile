@@ -22,4 +22,7 @@ RUN npm ci --omit=dev
 COPY packages/shared ./packages/shared
 COPY packages/job ./packages/job
 
+# 程序只读文件、不写盘，没有理由以 root 跑；node 镜像自带 uid 1000 的 node 用户
+USER node
+
 CMD ["node", "packages/job/bin/gd-job.js"]

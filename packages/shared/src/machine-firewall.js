@@ -70,21 +70,17 @@ async function listSwasInstances({ credential, regionId }) {
 }
 
 async function listMachines({ credential, regions, logger = NOOP_LOGGER }) {
-  const promises = [];
+  const tasks = [];
   for (const regionId of regions) {
-    promises.push(listEcsInstances({ credential, regionId }));
-    promises.push(listSwasInstances({ credential, regionId }));
-  }
-
-  const machines = [];
-  const results = await Promise.allSettled(promises);
-  for (const result of results) {
-    if (result.status === 'fulfilled' && result.value) machines.push(...result.value);
-    else if (result.status === 'rejected') {
-      logger.warn('[machine-firewall] Failed to list instances:', result.reason?.message || result.reason);
+    for (const [ product, list ] of [ [ 'ecs', listEcsInstances ], [ 'swas-open', listSwasInstances ] ]) {
+      // 单个地域/产品失败只记 warn，其余继续；warn 里带上是谁失败了，不然十个地域的 403 长得一模一样
+      tasks.push(list({ credential, regionId }).catch(err => {
+        logger.warn(`[machine-firewall] Failed to list ${product} instances in ${regionId}:`, err?.message || err);
+        return [];
+      }));
     }
   }
-  return machines;
+  return (await Promise.all(tasks)).flat();
 }
 
 function clientFor(credential, machine) {

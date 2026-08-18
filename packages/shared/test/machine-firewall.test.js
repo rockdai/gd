@@ -3,7 +3,8 @@
 const assert = require('assert');
 const { PORT_RANGE } = require('../src/firewall-rule');
 
-function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListError = null, swasListError = null, swasCreateErrors = {} } = {}) {
+function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListError = null, swasListError = null, swasCreateErrors = {}, instances = {} } = {}) {
+  // instances: { [regionId]: { ecs: [...] | Error, swas: [...] | Error } } — 给 listMachines 用
   const modulePath = require.resolve('../src/machine-firewall');
   const ecsSdkPath = require.resolve('@alicloud/ecs20140526');
   const swasSdkPath = require.resolve('@alicloud/swas-open20200601');
@@ -32,6 +33,11 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
       this.listCalls = [];
       ecsClients.push(this);
     }
+    async describeInstances(req) {
+      const fixture = (instances[req.regionId] || {}).ecs || [];
+      if (fixture instanceof Error) throw fixture;
+      return { body: { instances: { instance: fixture.map(i => ({ ...i })) } } };
+    }
     async describeSecurityGroupAttribute(req) {
       this.listCalls.push(req);
       if (ecsListError) throw ecsListError;
@@ -46,6 +52,11 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
       this.createCalls = [];
       this.deleteCalls = [];
       swasClients.push(this);
+    }
+    async listInstances(req) {
+      const fixture = (instances[req.regionId] || {}).swas || [];
+      if (fixture instanceof Error) throw fixture;
+      return { body: { instances: fixture.map(i => ({ ...i })) } };
     }
     async createFirewallRules(req) {
       this.createCalls.push(req);
@@ -344,6 +355,39 @@ describe('machine-firewall cleanupRules', () => {
       });
       assert.strictEqual(result.deletedCount, 0);
       assert.strictEqual(swasClients[0].deleteCalls.length, 0);
+    } finally { restore(); }
+  });
+});
+
+describe('machine-firewall listMachines', () => {
+  it('merges ECS and SWAS across regions and keeps going when one listing fails, naming the culprit', async () => {
+    const { machineFirewall, restore } = loadMachineFirewallWithMocks({
+      instances: {
+        'cn-hangzhou': {
+          ecs: [ { instanceId: 'i-1', instanceName: 'nas', securityGroupIds: { securityGroupId: [ 'sg-1' ] } } ],
+          swas: new Error('NoPermission: code: 403'),
+        },
+        'cn-hongkong': {
+          ecs: [],
+          swas: [ { instanceId: 'swas-1', instanceName: 'blog' } ],
+        },
+      },
+    });
+    const warnings = [];
+    try {
+      const machines = await machineFirewall.listMachines({
+        credential: CREDENTIAL,
+        regions: [ 'cn-hangzhou', 'cn-hongkong' ],
+        logger: { info() {}, warn: (...args) => warnings.push(args.join(' ')), error() {} },
+      });
+      assert.deepStrictEqual(
+        machines.map(m => `${m.product}/${m.regionId}/${m.instanceId}`),
+        [ 'ecs/cn-hangzhou/i-1', 'swas-open/cn-hongkong/swas-1' ]
+      );
+      assert.deepStrictEqual(machines[0].securityGroupIds, [ 'sg-1' ]);
+      // 一条 warn，且说清了是哪个产品、哪个地域
+      assert.strictEqual(warnings.length, 1);
+      assert.ok(warnings[0].includes('swas-open') && warnings[0].includes('cn-hangzhou') && warnings[0].includes('NoPermission'));
     } finally { restore(); }
   });
 });
