@@ -4,6 +4,7 @@ const { resolveRegions } = require('@gd/shared/src/regions');
 
 const DEFAULT_INTERVAL_SECONDS = 300;
 const UNIT_SECONDS = { s: 1, m: 60, h: 3600 };
+const MAX_INTERVAL_SECONDS = 2147483;
 
 function parseList(value) {
   return String(value || '')
@@ -22,7 +23,9 @@ function parseInterval(value) {
   const amount = Number(matched[1]);
   if (!Number.isInteger(amount) || amount <= 0) throw new Error(`Invalid SYNC_INTERVAL: ${value}`);
 
-  return amount * UNIT_SECONDS[(matched[2] || 's').toLowerCase()];
+  const seconds = amount * UNIT_SECONDS[(matched[2] || 's').toLowerCase()];
+  if (seconds > MAX_INTERVAL_SECONDS) throw new Error(`Invalid SYNC_INTERVAL: ${value} (max ${MAX_INTERVAL_SECONDS}s)`);
+  return seconds;
 }
 
 function loadConfig(env = process.env) {

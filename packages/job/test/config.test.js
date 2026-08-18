@@ -27,6 +27,7 @@ describe('job config parseInterval', () => {
     assert.throws(() => parseInterval('abc'), /Invalid SYNC_INTERVAL/);
     assert.throws(() => parseInterval('5d'), /Invalid SYNC_INTERVAL/);
     assert.throws(() => parseInterval('5 m'), /Invalid SYNC_INTERVAL/);
+    assert.throws(() => parseInterval('1000h'), /Invalid SYNC_INTERVAL/);
   });
 });
 
