@@ -1,9 +1,11 @@
 services:
   gd-job:
-    build:
-      context: ../..
-      dockerfile: packages/job/Dockerfile
-    image: gd-job
+    # 官方镜像（linux/amd64 + linux/arm64），不需要 clone 仓库
+    image: rockdai/gd:latest
+    # 想自己构建：注释掉上面的 image，打开下面两行（构建上下文是仓库根目录）
+    # build:
+    #   context: ../..
+    #   dockerfile: packages/job/Dockerfile
     container_name: gd-job
     restart: unless-stopped
     # 每轮打一行摘要（默认 5 分钟一轮），做个轮转免得日志无限长

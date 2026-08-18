@@ -120,25 +120,24 @@ s deploy --type code
 
 ## Docker 部署（NAS / Homelab）
 
-```bash
-cd packages/job
-cp docker-compose.example.yml docker-compose.yml
-# 编辑 docker-compose.yml 填入 AK/SK 和地域
-docker compose up -d
-docker compose logs -f gd-job
-```
-
-compose 不是必需的，直接用 docker 也一样（compose 只是把 build、run、自动重启、日志轮转写在一个文件里）：
+镜像发布在 Docker Hub：[`rockdai/gd`](https://hub.docker.com/r/rockdai/gd)（`linux/amd64` + `linux/arm64`，`latest` 跟随 `main`，另有 `sha-<commit>` 标签）。不需要 clone 仓库。
 
 ```bash
-docker build -f packages/job/Dockerfile -t gd-job .
 docker run -d --name gd-job --restart unless-stopped \
   --log-opt max-size=10m --log-opt max-file=3 \
   -e ACCESS_KEY_ID=xxx -e ACCESS_KEY_SECRET=yyy \
   -e TZ=Asia/Shanghai -e REGIONS=cn-hangzhou,cn-hongkong \
   -e RULE_LABEL=home \
-  gd-job
+  rockdai/gd:latest
 docker logs -f gd-job
+```
+
+用 compose 的话，把 [`packages/job/docker-compose.example.yml`](packages/job/docker-compose.example.yml) 存成 `docker-compose.yml`，填上 AK/SK 和地域，`docker compose up -d`；它默认拉官方镜像，想自己构建就按文件里的注释把 `image` 换成 `build`。
+
+自己构建（构建上下文是仓库根目录）：
+
+```bash
+docker build -f packages/job/Dockerfile -t gd-job .
 ```
 
 ### 环境变量
