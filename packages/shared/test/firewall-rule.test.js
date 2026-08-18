@@ -14,6 +14,9 @@ const {
   buildManagedCliRemark,
   isLegacyManagedCliRemark,
   isManagedCliRemark,
+  GD_JOB_RULE_PREFIX,
+  buildManagedJobRemark,
+  isManagedJobRemark,
   isOurManagedRemark,
   isRuleExpired,
   isExpiredWebRule,
@@ -161,5 +164,47 @@ describe('firewall-rule helpers', () => {
     });
 
     assert.strictEqual(matchedRule, null);
+  });
+
+  it('builds and matches gd-job remarks scoped by label', () => {
+    assert.strictEqual(GD_JOB_RULE_PREFIX, 'gd-job');
+    assert.strictEqual(
+      buildManagedJobRemark('home', '2026-08-18 09:00:00'),
+      'gd-job:home@2026-08-18 09:00:00'
+    );
+
+    // 认自己的 label
+    assert.strictEqual(isManagedJobRemark('gd-job:home@2026-08-18 09:00:00', 'home'), true);
+
+    // 不认别的 label —— 多站点隔离的关键
+    assert.strictEqual(isManagedJobRemark('gd-job:office@2026-08-18 09:00:00', 'home'), false);
+
+    // 前缀相同但 label 更长，不能误判
+    assert.strictEqual(isManagedJobRemark('gd-job:home2@2026-08-18 09:00:00', 'home'), false);
+
+    // 不认其他模块的规则
+    assert.strictEqual(isManagedJobRemark('gd-web@2026-08-18 09:00:00', 'home'), false);
+    assert.strictEqual(isManagedJobRemark('gd-cli:home@2026-08-18 09:00:00', 'home'), false);
+    assert.strictEqual(isManagedJobRemark('云谷园区', 'home'), false);
+  });
+
+  it('treats gd-job remarks as ours in the fail-closed guard', () => {
+    assert.strictEqual(isOurManagedRemark('gd-job:home@2026-08-18 09:00:00'), true);
+
+    // 时间戳非法 → 不认，避免误删手工规则
+    assert.strictEqual(isOurManagedRemark('gd-job:home@invalid'), false);
+    assert.strictEqual(isOurManagedRemark('gd-job:home'), false);
+
+    // 前缀相近但不是我们的
+    assert.strictEqual(isOurManagedRemark('gd-jobx:home@2026-08-18 09:00:00'), false);
+  });
+
+  it('keeps gd-job rules out of the web expiry sweep', () => {
+    // gd-job 规则即使很旧，也不该被 web 的 24h TTL 判定命中
+    assert.strictEqual(isExpiredWebRule({
+      protocol: 'TCP',
+      port: PORT_RANGE,
+      remark: 'gd-job:home@2020-01-01 00:00:00',
+    }), false);
   });
 });

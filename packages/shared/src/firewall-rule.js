@@ -6,6 +6,7 @@ const GD_WEB_RULE_PREFIX = 'gd-web';
 const GD_WEB_RULE_TTL_MS = 24 * 60 * 60 * 1000;
 const GD_DDNS_RULE_PREFIX = 'gd-ddns';
 const GD_CLI_RULE_PREFIX = 'gd-cli';
+const GD_JOB_RULE_PREFIX = 'gd-job';
 
 function toSourceCidrIp(ip) {
   if (!ip || ip.includes('/')) return ip;
@@ -73,13 +74,22 @@ function isManagedCliRemark(value, remark) {
   return hasRemarkPrefix(value, `${GD_CLI_RULE_PREFIX}:${remark}`) || isLegacyManagedCliRemark(value, remark);
 }
 
+function buildManagedJobRemark(label, timestamp = formatDateTime()) {
+  return `${GD_JOB_RULE_PREFIX}:${label}@${timestamp}`;
+}
+
+function isManagedJobRemark(value, label) {
+  return hasRemarkPrefix(value, `${GD_JOB_RULE_PREFIX}:${label}`);
+}
+
 function isOurManagedRemark(value) {
   if (typeof value !== 'string' || !value) return false;
   if (parseRuleTimestamp(value) === null) return false;
   return (
     hasRemarkPrefix(value, GD_WEB_RULE_PREFIX) ||
     value.startsWith(`${GD_DDNS_RULE_PREFIX}:`) ||
-    value.startsWith(`${GD_CLI_RULE_PREFIX}:`)
+    value.startsWith(`${GD_CLI_RULE_PREFIX}:`) ||
+    value.startsWith(`${GD_JOB_RULE_PREFIX}:`)
   );
 }
 
@@ -199,6 +209,7 @@ module.exports = {
   GD_WEB_RULE_TTL_MS,
   GD_DDNS_RULE_PREFIX,
   GD_CLI_RULE_PREFIX,
+  GD_JOB_RULE_PREFIX,
   toSourceCidrIp,
   normalizeIpForCompare,
   normalizeProtocol,
@@ -212,6 +223,8 @@ module.exports = {
   buildManagedCliRemark,
   isLegacyManagedCliRemark,
   isManagedCliRemark,
+  buildManagedJobRemark,
+  isManagedJobRemark,
   isOurManagedRemark,
   parseRuleTimestamp,
   isRuleExpired,
