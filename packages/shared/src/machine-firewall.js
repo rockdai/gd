@@ -231,6 +231,7 @@ async function cleanupRules({ credential, machine, shouldDelete, rules = null, l
 }
 
 module.exports = {
+  FIELDS,
   listMachines,
   listEcsInstances,
   listSwasInstances,

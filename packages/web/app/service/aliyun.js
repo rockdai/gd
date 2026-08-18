@@ -13,13 +13,8 @@ const {
   listMachines,
   addIpRules,
   cleanupRules,
+  FIELDS,
 } = require('@gd/shared/src/machine-firewall');
-
-// 不同 product 的协议/端口/备注字段名，用于构造 TTL 判定谓词
-const EXPIRY_FIELDS = {
-  ecs: { protocol: 'ipProtocol', port: 'portRange', remark: 'description' },
-  'swas-open': { protocol: 'ruleProtocol', port: 'port', remark: 'remark' },
-};
 
 class AliyunService extends Service {
 
@@ -59,7 +54,7 @@ class AliyunService extends Service {
     const results = [];
 
     for (const machine of machines) {
-      if (!EXPIRY_FIELDS[machine.product]) {
+      if (!FIELDS[machine.product]) {
         results.push({ ...machine, status: 'skipped', message: `Unsupported product: ${machine.product}` });
         continue;
       }
@@ -81,7 +76,7 @@ class AliyunService extends Service {
   }
 
   async _cleanupExpiredWebRules(credential, machine) {
-    const fields = EXPIRY_FIELDS[machine.product];
+    const fields = FIELDS[machine.product];
     if (!fields) return { deletedCount: 0 };
 
     return cleanupRules({

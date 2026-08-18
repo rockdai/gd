@@ -14,12 +14,6 @@ const machineFirewall = require('@gd/shared/src/machine-firewall');
 const { getPublicIp } = require('@gd/shared/src/public-ip');
 const { selectMachines, findMissingEntries, withSecurityGroup } = require('./machines');
 
-// 两种 product 的规则字段名差异
-const RULE_FIELDS = {
-  ecs: { protocol: 'ipProtocol', port: 'portRange', remark: 'description' },
-  'swas-open': { protocol: 'ruleProtocol', port: 'port', remark: 'remark' },
-};
-
 const DEFAULT_DEPS = {
   getPublicIp,
   listMachines: machineFirewall.listMachines,
@@ -33,7 +27,7 @@ const DEFAULT_DEPS = {
  * 与时间无关：IP 没变时规则就该一直留着，按 TTL 删会制造无意义的抖动。
  */
 function buildStaleRulePredicate({ label, sourceCidrIp, product }) {
-  const fields = RULE_FIELDS[product];
+  const fields = machineFirewall.FIELDS[product];
   const currentIp = normalizeIpForCompare(sourceCidrIp);
   return rule => {
     // 与 web 的 isExpiredWebRule 同构：协议、端口、备注前缀三者都要命中，再看 IP
