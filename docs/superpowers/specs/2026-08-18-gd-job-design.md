@@ -36,6 +36,8 @@
 
 采用 `gd-cli` 那种 `前缀:标识@时间戳` 的三段形态，而不是 `gd-web` 的两段形态，是为了支持多站点部署（见 §7）。
 
+注意区分：代码常量 `GD_JOB_RULE_PREFIX`（值为 `gd-job`）必须保持模块专属，它与 `GD_WEB_RULE_PREFIX` / `GD_DDNS_RULE_PREFIX` / `GD_CLI_RULE_PREFIX` 并列，正是模块间互不认领规则的身份标识。§6 中「配置项不区分模块」指的是环境变量命名，不涉及这组常量。
+
 ### 3.1 隔离性验证
 
 新增 `gd-job` 前缀需要把它加进 `isOurManagedRemark()`（该函数是所有删除操作的 fail-closed 外层守卫）。已确认这不会让既有模块误删 gd-job 规则：
@@ -135,19 +137,28 @@ packages/job/
 
 全部通过环境变量提供，符合 Docker 惯例。
 
+变量名不带 `GD_JOB_` 之类的模块前缀，与项目现有约定一致——`ACCESS_KEY_ID`、`PASSWORD`、`JWT_SECRET` 都是裸描述名，只有确实成体系的子系统才加前缀（`PASSKEY_*`、`AMAP_*`）。这些配置项按项目级语义定义，不属于 gd-job 私有。
+
+其中两项在其他模块也有对应概念，本次一并统一为同一个变量，避免同一个值在项目里存在两份来源：
+
+- **`REGIONS`**：`@gd/web` 目前把十个地域硬编码在 `config/config.default.js`。改为默认值下沉到 `@gd/shared`，web 和 job 都读同一个 `REGIONS` 变量，未设置时取共享默认值。web 的现有行为不变（未设置即等于今天的硬编码列表）。
+- **`IP_ENDPOINT`**：`@gd/shared/src/public-ip.js` 目前把地址写死在同名常量里。改为该常量作为默认值、允许 `IP_ENDPOINT` 覆盖，`@gd/cli` 与 `@gd/job` 共同受益。
+
+`MACHINE_ALLOW` / `MACHINE_DENY` / `SYNC_INTERVAL` / `RULE_LABEL` 目前只有 gd-job 消费，但同样按项目级命名，将来其他模块需要同类语义时直接复用同一个变量。
+
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `ACCESS_KEY_ID` | — | 必填。阿里云 AK |
 | `ACCESS_KEY_SECRET` | — | 必填。阿里云 SK |
-| `GD_JOB_ALLOW` | 空 | 机器白名单，逗号分隔 |
-| `GD_JOB_DENY` | 空 | 机器黑名单，逗号分隔 |
-| `GD_JOB_INTERVAL` | `5m` | 定时间隔，接受 `5m` / `30s` / 纯秒数 |
-| `GD_JOB_REGIONS` | 见下 | 扫描地域，逗号分隔 |
-| `GD_JOB_LABEL` | `default` | 写进规则备注，用于多站点隔离 |
-| `GD_JOB_IP_ENDPOINT` | `https://get-ip.rockdai.com` | 公网 IP 获取地址 |
+| `MACHINE_ALLOW` | 空 | 机器白名单，逗号分隔 |
+| `MACHINE_DENY` | 空 | 机器黑名单，逗号分隔 |
+| `SYNC_INTERVAL` | `5m` | 定时间隔，接受 `5m` / `30s` / 纯秒数 |
+| `REGIONS` | 见下 | 扫描地域，逗号分隔 |
+| `RULE_LABEL` | `default` | 写进规则备注，用于多站点隔离 |
+| `IP_ENDPOINT` | `https://get-ip.rockdai.com` | 公网 IP 获取地址 |
 | `TZ` | 容器默认（UTC） | 建议设为 `Asia/Shanghai` |
 
-`GD_JOB_REGIONS` 默认值沿用 `packages/web/config/config.default.js` 中的十个地域：`cn-hangzhou`、`cn-shanghai`、`cn-beijing`、`cn-shenzhen`、`cn-hongkong`、`ap-northeast-1`、`ap-southeast-1`、`us-west-1`、`us-east-1`、`eu-central-1`。
+`REGIONS` 的共享默认值即目前 `packages/web/config/config.default.js` 中的十个地域，迁至 `@gd/shared` 后由 web 和 job 共用：`cn-hangzhou`、`cn-shanghai`、`cn-beijing`、`cn-shenzhen`、`cn-hongkong`、`ap-northeast-1`、`ap-southeast-1`、`us-west-1`、`us-east-1`、`eu-central-1`。
 
 之所以必须可配：每轮对每个地域各调用一次 ECS 和 SWAS 列举接口，十个地域即 20 次调用。按默认 5 分钟间隔计算是每天 5760 次，其中绝大多数打在用户没有任何机器的地域上。
 
@@ -157,11 +168,10 @@ packages/job/
 
 - **端口与协议**：固定 `1/65535` + TCP/UDP，与现有四个模块一致。做成可配会与既有模块产生行为差异，且会渗入规则匹配逻辑（预检和清理都依赖端口相等判断）。
 - **启动是否立即执行**：固定为启动时立即同步一次，不等第一个间隔。NAS 重启后应尽快恢复访问，没有需要延迟的场景。
-- **dry-run**：经确认不需要。
 
 ## 7. 多站点隔离
 
-`GD_JOB_LABEL` 的存在是为了解决一个真实的相互破坏问题。若同一个阿里云账号下，家里和公司各跑一个 gd-job，而备注中不带区分标识：
+`RULE_LABEL` 的存在是为了解决一个真实的相互破坏问题。若同一个阿里云账号下，家里和公司各跑一个 gd-job，而备注中不带区分标识：
 
 ```
 家里实例：看到 gd-job@t 源IP=5.6.7.8 → 不是我的 IP，删除 → 添加 1.2.3.4
@@ -240,14 +250,16 @@ README 增加「Docker 部署（NAS / Homelab）」一节。
 - IP 未变时跳过整轮
 - 上一轮有失败时不更新 `lastIp`，下一轮重新执行
 - 旧 IP 规则被识别为待删、当前 IP 规则被保留
-- `GD_JOB_INTERVAL` 解析：`5m` / `30s` / `300` / 非法值
+- `SYNC_INTERVAL` 解析：`5m` / `30s` / `300` / 非法值
+- `REGIONS` 未设置时回落到 shared 默认列表，设置后按逗号切分并去除空白
+- `IP_ENDPOINT` 未设置时 `getPublicIp()` 仍请求内置常量地址
 
 ## 13. 对既有模块的影响
 
 | 模块 | 影响 |
 |------|------|
-| `@gd/shared` | 新增 `machine-firewall.js`；`firewall-rule.js` 增加 `GD_JOB_RULE_PREFIX`、`buildManagedJobRemark`、`isManagedJobRemark`，并把 `gd-job` 加入 `isOurManagedRemark`；`public-ip.js` 的 `getPublicIp()` 增加可选 `{ endpoint }` 参数以支持 `GD_JOB_IP_ENDPOINT`，缺省时仍取 `IP_ENDPOINT`，`@gd/cli` 的现有无参调用不受影响 |
-| `@gd/web` | `app/service/aliyun.js` 改为委托 shared，对外行为不变；11 个测试迁出 |
+| `@gd/shared` | 新增 `machine-firewall.js`；`firewall-rule.js` 增加 `GD_JOB_RULE_PREFIX`、`buildManagedJobRemark`、`isManagedJobRemark`，并把 `gd-job` 加入 `isOurManagedRemark`；新增共享的默认地域列表供 `REGIONS` 使用；`public-ip.js` 的 `getPublicIp()` 增加可选 `{ endpoint }` 参数，缺省回落到 `IP_ENDPOINT` 环境变量、再回落到内置常量，`@gd/cli` 的现有无参调用不受影响 |
+| `@gd/web` | `app/service/aliyun.js` 改为委托 shared，对外行为不变；11 个测试迁出；`config/config.default.js` 的地域列表改为读 `REGIONS`（未设置时取 shared 默认值，即今天的同一份列表） |
 | `@gd/scheduler` | 无改动。已验证 `isOurManagedRemark` 的变化不影响其行为（见 §3.1） |
 | `@gd/cli` | 无改动 |
 
