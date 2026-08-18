@@ -6,6 +6,7 @@ const GD_WEB_RULE_PREFIX = 'gd-web';
 const GD_WEB_RULE_TTL_MS = 24 * 60 * 60 * 1000;
 const GD_DDNS_RULE_PREFIX = 'gd-ddns';
 const GD_CLI_RULE_PREFIX = 'gd-cli';
+const GD_JOB_RULE_PREFIX = 'gd-job';
 
 function toSourceCidrIp(ip) {
   if (!ip || ip.includes('/')) return ip;
@@ -73,13 +74,28 @@ function isManagedCliRemark(value, remark) {
   return hasRemarkPrefix(value, `${GD_CLI_RULE_PREFIX}:${remark}`) || isLegacyManagedCliRemark(value, remark);
 }
 
+function buildManagedJobRemark(label, timestamp = formatDateTime()) {
+  return `${GD_JOB_RULE_PREFIX}:${label}@${timestamp}`;
+}
+
+// gd-job 是新前缀、只有一种生成形态 `gd-job:<label>@<时间戳>`，所以按精确形态匹配：
+// 最后一个 @ 之前必须恰好是 gd-job:<label>，之后必须是合法时间戳。
+// 前缀匹配（hasRemarkPrefix）会把手工写的 `gd-job:home@note@<ts>` 也当成自己的，进而可能误删。
+function isManagedJobRemark(value, label) {
+  if (typeof value !== 'string') return false;
+  const at = value.lastIndexOf('@');
+  if (at === -1) return false;
+  return value.slice(0, at) === `${GD_JOB_RULE_PREFIX}:${label}` && parseRuleTimestamp(value) !== null;
+}
+
 function isOurManagedRemark(value) {
   if (typeof value !== 'string' || !value) return false;
   if (parseRuleTimestamp(value) === null) return false;
   return (
     hasRemarkPrefix(value, GD_WEB_RULE_PREFIX) ||
     value.startsWith(`${GD_DDNS_RULE_PREFIX}:`) ||
-    value.startsWith(`${GD_CLI_RULE_PREFIX}:`)
+    value.startsWith(`${GD_CLI_RULE_PREFIX}:`) ||
+    value.startsWith(`${GD_JOB_RULE_PREFIX}:`)
   );
 }
 
@@ -199,6 +215,7 @@ module.exports = {
   GD_WEB_RULE_TTL_MS,
   GD_DDNS_RULE_PREFIX,
   GD_CLI_RULE_PREFIX,
+  GD_JOB_RULE_PREFIX,
   toSourceCidrIp,
   normalizeIpForCompare,
   normalizeProtocol,
@@ -212,6 +229,8 @@ module.exports = {
   buildManagedCliRemark,
   isLegacyManagedCliRemark,
   isManagedCliRemark,
+  buildManagedJobRemark,
+  isManagedJobRemark,
   isOurManagedRemark,
   parseRuleTimestamp,
   isRuleExpired,

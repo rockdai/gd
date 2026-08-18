@@ -1,0 +1,39 @@
+services:
+  gd-job:
+    build:
+      context: ../..
+      dockerfile: packages/job/Dockerfile
+    image: gd-job
+    container_name: gd-job
+    restart: unless-stopped
+    # 每轮打一行摘要（默认 5 分钟一轮），做个轮转免得日志无限长
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      # 必填：建议用最小权限的 RAM 子账号
+      ACCESS_KEY_ID: "your-access-key-id"
+      ACCESS_KEY_SECRET: "your-access-key-secret"
+
+      # 容器默认 UTC，不设的话规则备注里的时间会差 8 小时
+      TZ: "Asia/Shanghai"
+
+      # 只扫有机器的地域，默认十个地域每轮要发 20 次 API 调用
+      REGIONS: "cn-hangzhou,cn-hongkong"
+
+      # 多站点部署时给每个位置一个独立 label，否则两边会互删对方的规则
+      RULE_LABEL: "home"
+
+      # 可选：只操作这些机器（填实例 ID 或实例名皆可）
+      # MACHINE_ALLOW: "nas-hk,i-bp1hrakbpd2a3kmmrxb9"
+
+      # 可选：不操作这些机器
+      # MACHINE_DENY: "prod-db"
+
+      # 可选：默认 5m
+      # SYNC_INTERVAL: "5m"
+
+      # 可选：默认 https://get-ip.rockdai.com
+      # IP_ENDPOINT: "https://get-ip.rockdai.com"

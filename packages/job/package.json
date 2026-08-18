@@ -1,0 +1,15 @@
+{
+  "name": "@gd/job",
+  "version": "1.0.0",
+  "private": true,
+  "bin": {
+    "gd-job": "bin/gd-job.js"
+  },
+  "scripts": {
+    "start": "node bin/gd-job.js",
+    "test": "egg-bin test"
+  },
+  "dependencies": {
+    "@gd/shared": "*"
+  }
+}

@@ -1,32 +1,20 @@
 'use strict';
 
 const { Service } = require('egg');
-const {
-  default: ECSClient,
-  DescribeInstancesRequest,
-  AuthorizeSecurityGroupRequest,
-  RevokeSecurityGroupRequest,
-} = require('@alicloud/ecs20140526');
-const {
-  default: SWASClient,
-  ListInstancesRequest,
-  CreateFirewallRulesRequest,
-  DeleteFirewallRulesRequest,
-} = require('@alicloud/swas-open20200601');
 const { resolveCredentials } = require('@gd/shared/src/aliyun-conf');
 const {
-  PORT_RANGE,
-  RULE_PROTOCOLS,
   GD_WEB_RULE_PREFIX,
   toSourceCidrIp,
   formatDateTime,
   getRuleField,
   isExpiredWebRule,
-  isOurManagedRemark,
-  findRuleByProtocolPortSource,
 } = require('@gd/shared/src/firewall-rule');
-const { listAllFirewallRules } = require('@gd/shared/src/swas-firewall');
-const { listSecurityGroupRules } = require('@gd/shared/src/ecs-firewall');
+const {
+  listMachines,
+  addIpRules,
+  cleanupRules,
+  FIELDS,
+} = require('@gd/shared/src/machine-firewall');
 
 class AliyunService extends Service {
 
@@ -38,7 +26,6 @@ class AliyunService extends Service {
     if (accessKeyId && accessKeySecret) {
       return { accessKeyId, accessKeySecret };
     }
-    // fallback to env / .aliyun.conf
     const cred = resolveCredentials({ cwd: this.app.baseDir });
     if (!cred.accessKeyId || !cred.accessKeySecret) {
       throw new Error('Missing Alibaba Cloud credentials. Set ACCESS_KEY_ID/ACCESS_KEY_SECRET env vars or create .aliyun.conf');
@@ -50,113 +37,37 @@ class AliyunService extends Service {
    * List all user machines across regions (ECS + SWAS)
    */
   async listMachines() {
-    const credential = this.getCredential();
-    const regions = this.config.aliyun.regions || [];
-    const machines = [];
-
-    // Fetch ECS instances and SWAS instances in parallel across all regions
-    const promises = [];
-    for (const regionId of regions) {
-      promises.push(this._listEcsInstances(credential, regionId));
-      promises.push(this._listSwasInstances(credential, regionId));
-    }
-
-    const results = await Promise.allSettled(promises);
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
-        machines.push(...result.value);
-      } else if (result.status === 'rejected') {
-        this.logger.warn('[aliyun] Failed to list instances:', result.reason?.message || result.reason);
-      }
-    }
-
+    // 单个地域列举失败已由 shared 记 warn；web 这里保持原行为——把拿到的机器返回给前端
+    const { machines } = await listMachines({
+      credential: this.getCredential(),
+      regions: this.config.aliyun.regions || [],
+      logger: this.logger,
+    });
     return machines;
   }
 
   /**
-   * List ECS instances in a specific region
-   */
-  async _listEcsInstances(credential, regionId) {
-    const client = new ECSClient({
-      endpoint: `ecs.${regionId}.aliyuncs.com`,
-      ...credential,
-    });
-
-    const req = new DescribeInstancesRequest({
-      regionId,
-      pageSize: 100,
-    });
-
-    const resp = await client.describeInstances(req);
-    const instances = resp?.body?.instances?.instance || [];
-
-    return instances.map(inst => ({
-      product: 'ecs',
-      instanceId: inst.instanceId,
-      instanceName: inst.instanceName || inst.hostName || inst.instanceId,
-      regionId,
-      publicIpAddress: inst.publicIpAddress?.ipAddress || [],
-      status: inst.status,
-      securityGroupIds: inst.securityGroupIds?.securityGroupId || [],
-      tags: (inst.tags?.tag || []).map(t => ({ key: t.tagKey, value: t.tagValue })),
-    }));
-  }
-
-  /**
-   * List SWAS lightweight server instances in a specific region
-   */
-  async _listSwasInstances(credential, regionId) {
-    const client = new SWASClient({
-      endpoint: `swas.${regionId}.aliyuncs.com`,
-      regionId,
-      ...credential,
-    });
-
-    const req = new ListInstancesRequest({
-      regionId,
-      pageSize: 100,
-    });
-
-    const resp = await client.listInstances(req);
-    const instances = resp?.body?.instances || [];
-
-    return instances.map(inst => ({
-      product: 'swas-open',
-      instanceId: inst.instanceId,
-      instanceName: inst.instanceName || inst.instanceId,
-      regionId,
-      publicIpAddress: inst.publicIpAddress ? [ inst.publicIpAddress ] : [],
-      status: inst.status,
-      tags: (inst.tags || []).map(t => ({ key: t.key, value: t.value })),
-    }));
-  }
-
-  /**
    * Add an IP to the whitelist of selected machines
-   * @param {string} ip - IPv4 address
-   * @param {Array} machines - Array of { product, instanceId, regionId, securityGroupId? }
    */
   async addIpToWhitelist(ip, machines) {
     const credential = this.getCredential();
     const sourceCidrIp = toSourceCidrIp(ip);
-    const description = `${GD_WEB_RULE_PREFIX}@${formatDateTime()}`;
+    const remark = `${GD_WEB_RULE_PREFIX}@${formatDateTime()}`;
     const results = [];
 
     for (const machine of machines) {
+      if (!FIELDS[machine.product]) {
+        results.push({ ...machine, status: 'skipped', message: `Unsupported product: ${machine.product}` });
+        continue;
+      }
       try {
-        if (machine.product === 'ecs') {
-          const cleanup = await this._tryCleanupExpiredWebRules(credential, machine);
-          const result = await this._addIpToEcs(credential, machine, sourceCidrIp, description);
-          result.message = this._appendCleanupMessage(result.message, cleanup);
-          results.push({ ...machine, ...result });
-        } else if (machine.product === 'swas-open') {
-          const cleanup = await this._tryCleanupExpiredWebRules(credential, machine);
-          const result = await this._addIpToSwas(credential, machine, sourceCidrIp, description);
-          result.message = this._appendCleanupMessage(result.message, cleanup);
-          results.push({ ...machine, ...result });
-        } else {
-          results.push({ ...machine, status: 'skipped', message: `Unsupported product: ${machine.product}` });
-        }
+        // web 是先清后加，且两步各自列举规则。绝不能像 job 那样把一份列举结果传给 addIpRules 的 rules 参数：
+        // 清理若删掉了一条与当前 IP 相同的过期 gd-web 规则，过期的列举结果仍会让预检误判"已存在"而不再新增，
+        // 该 IP 就会失去访问。
+        const cleanup = await this._tryCleanupExpiredWebRules(credential, machine);
+        const result = await addIpRules({ credential, machine, sourceCidrIp, remark, logger: this.logger });
+        result.message = this._appendCleanupMessage(result.message, cleanup);
+        results.push({ ...machine, status: result.status, message: result.message });
       } catch (err) {
         this.logger.error(`[aliyun] Failed to add IP for ${machine.product}/${machine.instanceId}:`, err);
         results.push({ ...machine, status: 'error', message: err.message });
@@ -166,239 +77,20 @@ class AliyunService extends Service {
     return results;
   }
 
-  /**
-   * Add IP to ECS security group
-   *
-   * Pre-checks for existing rules covering the same protocol+port+source before
-   * calling AuthorizeSecurityGroup. This protects manually-maintained rules from
-   * being touched by any potential upsert behavior in the underlying API.
-   */
-  async _addIpToEcs(credential, machine, sourceCidrIp, description) {
-    const { regionId, securityGroupId } = machine;
-    if (!securityGroupId) {
-      return { status: 'error', message: 'securityGroupId is required for ECS' };
-    }
-
-    const client = new ECSClient({
-      endpoint: `ecs.${regionId}.aliyuncs.com`,
-      ...credential,
-    });
-
-    let existingRules;
-    try {
-      existingRules = await listSecurityGroupRules({ client, securityGroupId, regionId });
-    } catch (err) {
-      this.logger.error(`[aliyun] Failed to list ECS rules for pre-check on ${machine.instanceId}:`, err.message || err);
-      return {
-        status: 'error',
-        message: `Failed to list ECS rules: ${err.message || err}; refusing to add to keep manual rules safe`,
-      };
-    }
-
-    const protocolResults = [];
-    let hasSuccess = false;
-    let hasFailure = false;
-
-    for (const protocol of RULE_PROTOCOLS) {
-      const existing = findRuleByProtocolPortSource({
-        rules: existingRules,
-        protocol,
-        sourceCidrIp,
-        protocolField: 'ipProtocol',
-        portField: 'portRange',
-      });
-
-      if (existing) {
-        protocolResults.push(`${protocol}: already exists`);
-        hasSuccess = true;
-        continue;
-      }
-
-      const req = new AuthorizeSecurityGroupRequest({
-        regionId,
-        securityGroupId,
-        ipProtocol: protocol,
-        portRange: PORT_RANGE,
-        sourceCidrIp,
-        description,
-      });
-
-      try {
-        await client.authorizeSecurityGroup(req);
-        protocolResults.push(`${protocol}: added`);
-        hasSuccess = true;
-      } catch (err) {
-        if (err.message && (err.message.includes('AuthorizationAlreadyExist') || err.message.includes('RuleDuplicate'))) {
-          protocolResults.push(`${protocol}: already exists`);
-          hasSuccess = true;
-          continue;
-        }
-        protocolResults.push(`${protocol}: failed (${err.message})`);
-        hasFailure = true;
-      }
-    }
-
-    return this._buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure });
-  }
-
-  /**
-   * Add IP to SWAS firewall
-   *
-   * Pre-checks for existing rules covering the same protocol+port+source before
-   * calling CreateFirewallRules. This protects manually-maintained rules from
-   * being touched by any potential upsert behavior in the underlying API.
-   */
-  async _addIpToSwas(credential, machine, sourceCidrIp, description) {
-    const { regionId, instanceId } = machine;
-
-    const client = new SWASClient({
-      endpoint: `swas.${regionId}.aliyuncs.com`,
-      regionId,
-      ...credential,
-    });
-
-    let existingRules;
-    try {
-      existingRules = await listAllFirewallRules({ client, instanceId, regionId });
-    } catch (err) {
-      this.logger.error(`[aliyun] Failed to list SWAS rules for pre-check on ${instanceId}:`, err.message || err);
-      return {
-        status: 'error',
-        message: `Failed to list SWAS rules: ${err.message || err}; refusing to add to keep manual rules safe`,
-      };
-    }
-
-    const protocolResults = [];
-    let hasSuccess = false;
-    let hasFailure = false;
-
-    for (const protocol of RULE_PROTOCOLS) {
-      const existing = findRuleByProtocolPortSource({
-        rules: existingRules,
-        protocol,
-        sourceCidrIp,
-        protocolField: 'ruleProtocol',
-        portField: 'port',
-      });
-
-      if (existing) {
-        protocolResults.push(`${protocol}: already exists`);
-        hasSuccess = true;
-        continue;
-      }
-
-      const req = new CreateFirewallRulesRequest({
-        instanceId,
-        regionId,
-        firewallRules: [{
-          port: PORT_RANGE,
-          ruleProtocol: protocol,
-          sourceCidrIp,
-          remark: description,
-        }],
-      });
-
-      try {
-        await client.createFirewallRules(req);
-        protocolResults.push(`${protocol}: added`);
-        hasSuccess = true;
-      } catch (err) {
-        if (err.message && err.message.includes('FirewallRuleAlreadyExist')) {
-          protocolResults.push(`${protocol}: already exists`);
-          hasSuccess = true;
-          continue;
-        }
-        protocolResults.push(`${protocol}: failed (${err.message})`);
-        hasFailure = true;
-      }
-    }
-
-    return this._buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure });
-  }
-
   async _cleanupExpiredWebRules(credential, machine) {
-    if (machine.product === 'ecs') {
-      return await this._cleanupExpiredEcsRules(credential, machine);
-    }
-    if (machine.product === 'swas-open') {
-      return await this._cleanupExpiredSwasRules(credential, machine);
-    }
-    return { deletedCount: 0 };
-  }
+    const fields = FIELDS[machine.product];
+    if (!fields) return { deletedCount: 0 };
 
-  async _cleanupExpiredEcsRules(credential, machine) {
-    const { regionId, securityGroupId } = machine;
-    if (!securityGroupId) return { deletedCount: 0 };
-
-    const client = new ECSClient({
-      endpoint: `ecs.${regionId}.aliyuncs.com`,
-      ...credential,
+    return cleanupRules({
+      credential,
+      machine,
+      logger: this.logger,
+      shouldDelete: rule => isExpiredWebRule({
+        protocol: getRuleField(rule, fields.protocol),
+        port: getRuleField(rule, fields.port),
+        remark: getRuleField(rule, fields.remark),
+      }),
     });
-
-    const rules = await listSecurityGroupRules({ client, securityGroupId, regionId });
-    const staleRules = rules.filter(rule => {
-      const remark = getRuleField(rule, 'description');
-      if (!isOurManagedRemark(remark)) return false;
-      return isExpiredWebRule({
-        protocol: getRuleField(rule, 'ipProtocol'),
-        port: getRuleField(rule, 'portRange'),
-        remark,
-      });
-    });
-    const staleRuleIds = staleRules
-      .map(rule => getRuleField(rule, 'securityGroupRuleId'))
-      .filter(Boolean);
-
-    if (staleRuleIds.length === 0) return { deletedCount: 0 };
-
-    this.logger.info(`[aliyun] Cleaning up ${staleRuleIds.length} expired ECS rule(s) for ${machine.instanceId || securityGroupId}: ${staleRules.map(r => getRuleField(r, 'description')).join(', ')}`);
-
-    const deleteReq = new RevokeSecurityGroupRequest({
-      regionId,
-      securityGroupId,
-      securityGroupRuleId: staleRuleIds,
-    });
-    await client.revokeSecurityGroup(deleteReq);
-    return { deletedCount: staleRuleIds.length };
-  }
-
-  async _cleanupExpiredSwasRules(credential, machine) {
-    const { regionId, instanceId } = machine;
-    const client = new SWASClient({
-      endpoint: `swas.${regionId}.aliyuncs.com`,
-      regionId,
-      ...credential,
-    });
-
-    const rules = await listAllFirewallRules({
-      client,
-      instanceId,
-      regionId,
-    });
-    const staleRules = rules.filter(rule => {
-      const remark = getRuleField(rule, 'remark');
-      if (!isOurManagedRemark(remark)) return false;
-      return isExpiredWebRule({
-        protocol: getRuleField(rule, 'ruleProtocol'),
-        port: getRuleField(rule, 'port'),
-        remark,
-      });
-    });
-    const staleRuleIds = staleRules
-      .map(rule => getRuleField(rule, 'ruleId'))
-      .filter(Boolean);
-
-    if (staleRuleIds.length === 0) return { deletedCount: 0 };
-
-    this.logger.info(`[aliyun] Cleaning up ${staleRuleIds.length} expired SWAS rule(s) for ${instanceId}: ${staleRules.map(r => getRuleField(r, 'remark')).join(', ')}`);
-
-    const deleteReq = new DeleteFirewallRulesRequest({
-      instanceId,
-      regionId,
-      ruleIds: staleRuleIds,
-    });
-    await client.deleteFirewallRules(deleteReq);
-    return { deletedCount: staleRuleIds.length };
   }
 
   async _tryCleanupExpiredWebRules(credential, machine) {
@@ -406,25 +98,8 @@ class AliyunService extends Service {
       return await this._cleanupExpiredWebRules(credential, machine);
     } catch (err) {
       this.logger.warn(`[aliyun] Failed to cleanup expired web rules for ${machine.product}/${machine.instanceId}:`, err);
-      return {
-        deletedCount: 0,
-        failed: true,
-      };
+      return { deletedCount: 0, failed: true };
     }
-  }
-
-  _buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure }) {
-    let status = 'success';
-    if (hasFailure && hasSuccess) {
-      status = 'partial';
-    } else if (hasFailure) {
-      status = 'error';
-    }
-
-    return {
-      status,
-      message: protocolResults.join(', '),
-    };
   }
 
   _appendCleanupMessage(message, cleanup = {}) {
