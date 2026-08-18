@@ -17,6 +17,12 @@ on:
 permissions:
   contents: read
 
+# 同一 ref 的发布串行执行、按到达顺序排队（不取消进行中的）：两个 push 挨得近时，
+# 保证最后写 latest 的是较新的那个；即使较新的一次失败，latest 也停在较新的成功提交上，而不是更早的状态。
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -36,8 +42,9 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: rockdai/gd
+          # latest 只跟 main：手动在别的分支 dispatch 只会出 sha-<short>，不会覆盖生产 tag
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha
 
       - uses: docker/build-push-action@v6
