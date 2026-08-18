@@ -90,5 +90,8 @@ describe('job config loadConfig', () => {
     assert.throws(() => loadConfig({ ...BASE_ENV, RULE_LABEL: 'a@b' }), /RULE_LABEL/);
     assert.throws(() => loadConfig({ ...BASE_ENV, RULE_LABEL: 'a:b' }), /RULE_LABEL/);
     assert.throws(() => loadConfig({ ...BASE_ENV, RULE_LABEL: '' }), /RULE_LABEL/);
+    // 站点短名：32 是理智上限（生成的完整备注 27 + label ≤ 59）
+    assert.strictEqual(loadConfig({ ...BASE_ENV, RULE_LABEL: 'a'.repeat(32) }).label, 'a'.repeat(32));
+    assert.throws(() => loadConfig({ ...BASE_ENV, RULE_LABEL: 'a'.repeat(33) }), /RULE_LABEL: 33 chars \(max 32\)/);
   });
 });

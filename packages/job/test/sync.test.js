@@ -253,6 +253,42 @@ describe('job sync runOnce', () => {
     assert.ok(lines.info.some(line => line.includes('released-box')));
   });
 
+  it('adds only to the primary security group but cleans stale own rules from every attached group', async () => {
+    // i-1 挂了三个组，排序后主组 sg-a；曾经 sg-b 是主组时留下的旧 IP 规则必须也被清掉
+    const machines = [ { product: 'ecs', instanceId: 'i-1', instanceName: 'nas', regionId: 'cn-hangzhou', securityGroupIds: [ 'sg-c', 'sg-a', 'sg-b' ] } ];
+    const addTargets = [];
+    const cleanTargets = [];
+    const result = await runOnce({
+      config: CONFIG, logger: SILENT,
+      deps: makeDeps({
+        async listMachines() { return { machines, failures: [] }; },
+        async addIpRules(args) { addTargets.push(args.machine.securityGroupId); return ADDED_BOTH; },
+        async cleanupRules(args) {
+          cleanTargets.push(args.machine.securityGroupId);
+          return { deletedCount: args.machine.securityGroupId === 'sg-b' ? 2 : 0 };
+        },
+      }),
+    });
+    assert.deepStrictEqual(addTargets, [ 'sg-a' ]);
+    assert.deepStrictEqual(cleanTargets, [ 'sg-a', 'sg-b', 'sg-c' ]);
+    assert.strictEqual(result.deleted, 2);
+    assert.strictEqual(result.ok, true);
+  });
+
+  it('does not touch secondary security groups when the add did not fully succeed', async () => {
+    const machines = [ { product: 'ecs', instanceId: 'i-1', instanceName: 'nas', regionId: 'cn-hangzhou', securityGroupIds: [ 'sg-b', 'sg-a' ] } ];
+    let cleaned = 0;
+    await runOnce({
+      config: CONFIG, logger: SILENT,
+      deps: makeDeps({
+        async listMachines() { return { machines, failures: [] }; },
+        async addIpRules() { return { status: 'partial', message: 'TCP: added, UDP: failed (boom)', protocols: { TCP: 'added', UDP: 'failed' } }; },
+        async cleanupRules() { cleaned += 1; return { deletedCount: 0 }; },
+      }),
+    });
+    assert.strictEqual(cleaned, 0);
+  });
+
   it('uses the ECS security group chosen by sorting', async () => {
     const machines = [ { product: 'ecs', instanceId: 'i-1', instanceName: 'nas', regionId: 'cn-hangzhou', securityGroupIds: [ 'sg-b', 'sg-a' ] } ];
     let seenGroup;

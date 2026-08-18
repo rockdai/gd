@@ -22,6 +22,12 @@ function primarySecurityGroupId(machine) {
   return [ ...(machine.securityGroupIds || []) ].sort()[0];
 }
 
+// 除主组之外其余挂载的安全组（同样排序）。规则只加在主组，但自己留下的旧 IP 规则要在所有挂载的组里清：
+// 否则哪天多挂了一个排序更靠前的组，主组换了，原主组里的旧 IP 规则就永远没人管了。
+function otherSecurityGroupIds(machine) {
+  return [ ...(machine.securityGroupIds || []) ].sort().slice(1);
+}
+
 function withSecurityGroup(machine) {
   if (machine.product !== 'ecs') return machine;
   return { ...machine, securityGroupId: primarySecurityGroupId(machine) };
@@ -32,5 +38,6 @@ module.exports = {
   selectMachines,
   findMissingEntries,
   primarySecurityGroupId,
+  otherSecurityGroupIds,
   withSecurityGroup,
 };

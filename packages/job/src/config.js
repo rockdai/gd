@@ -4,6 +4,7 @@ const { resolveRegions } = require('@gd/shared/src/regions');
 
 const DEFAULT_INTERVAL_SECONDS = 300;
 const UNIT_SECONDS = { s: 1, m: 60, h: 3600 };
+const MAX_LABEL_LENGTH = 32;
 const MAX_INTERVAL_SECONDS = 2147483;
 
 function parseList(value) {
@@ -38,6 +39,13 @@ function loadConfig(env = process.env) {
   // 备注格式为 gd-job:<label>@<时间戳>，label 含分隔符会让解析产生歧义
   if (!label || label.includes(':') || label.includes('@')) {
     throw new Error(`Invalid RULE_LABEL: ${env.RULE_LABEL} (must be non-empty and contain neither ":" nor "@")`);
+  }
+  // label 是站点短名（home / office / …）。上限是理智上限，不是供应商限制：
+  // ECS description 上限 512 有文档；SWAS remark 上限未见文档，生产上 46 字符的备注可用。
+  // 生成的完整备注 = 27 + label 长度，32 让它落在 59 以内。真超了供应商限制会在每轮日志里带着
+  // 供应商的报错失败，不会静默。
+  if (label.length > MAX_LABEL_LENGTH) {
+    throw new Error(`Invalid RULE_LABEL: ${label.length} chars (max ${MAX_LABEL_LENGTH})`);
   }
 
   return {

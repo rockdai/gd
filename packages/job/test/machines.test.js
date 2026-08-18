@@ -6,6 +6,7 @@ const {
   selectMachines,
   findMissingEntries,
   primarySecurityGroupId,
+  otherSecurityGroupIds,
   withSecurityGroup,
 } = require('../src/machines');
 
@@ -58,6 +59,13 @@ describe('job machines security group selection', () => {
     assert.strictEqual(primarySecurityGroupId({ securityGroupIds: [ 'sg-a', 'sg-b' ] }), 'sg-a');
     assert.strictEqual(primarySecurityGroupId({ securityGroupIds: [] }), undefined);
     assert.strictEqual(primarySecurityGroupId({}), undefined);
+  });
+
+  it('lists the remaining security groups in the same sorted order', () => {
+    assert.deepStrictEqual(otherSecurityGroupIds(MACHINES[0]), [ 'sg-b' ]);
+    assert.deepStrictEqual(otherSecurityGroupIds({ securityGroupIds: [ 'sg-c', 'sg-a', 'sg-b' ] }), [ 'sg-b', 'sg-c' ]);
+    assert.deepStrictEqual(otherSecurityGroupIds({ securityGroupIds: [ 'sg-only' ] }), []);
+    assert.deepStrictEqual(otherSecurityGroupIds({}), []);
   });
 
   it('attaches securityGroupId for ECS and leaves SWAS untouched', () => {

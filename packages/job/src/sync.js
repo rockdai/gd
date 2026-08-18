@@ -12,7 +12,7 @@ const {
 } = require('@gd/shared/src/firewall-rule');
 const machineFirewall = require('@gd/shared/src/machine-firewall');
 const { getPublicIp } = require('@gd/shared/src/public-ip');
-const { selectMachines, findMissingEntries, withSecurityGroup } = require('./machines');
+const { selectMachines, findMissingEntries, withSecurityGroup, otherSecurityGroupIds } = require('./machines');
 
 const DEFAULT_DEPS = {
   getPublicIp,
@@ -105,11 +105,9 @@ async function runOnce({ config, deps = DEFAULT_DEPS, logger = console }) {
     // 安静的轮次不刷屏：只有真的写了才打机器级细节
     if (addedCount > 0) logger.info(`[gd-job] ${name}: ${added.message}`);
 
+    const shouldDelete = buildStaleRulePredicate({ label: config.label, sourceCidrIp, product: machine.product });
     try {
-      const cleaned = await deps.cleanupRules({
-        credential, machine, rules, logger,
-        shouldDelete: buildStaleRulePredicate({ label: config.label, sourceCidrIp, product: machine.product }),
-      });
+      const cleaned = await deps.cleanupRules({ credential, machine, rules, logger, shouldDelete });
       summary.deleted += cleaned.deletedCount;
       if (cleaned.deletedCount > 0) {
         logger.info(`[gd-job] ${name}: cleaned ${cleaned.deletedCount} stale rule(s)`);
@@ -117,6 +115,22 @@ async function runOnce({ config, deps = DEFAULT_DEPS, logger = console }) {
     } catch (err) {
       logger.error(`[gd-job] ${name}: cleanup failed: ${err.message || err}`);
       summary.failures += 1;
+    }
+
+    // ECS 挂多个安全组：规则只加在主组（排序后第一个），但其余组里自己留下的旧 IP 规则也要清——
+    // 主组是按 ID 排序选的，某天多挂一个排序更靠前的组，主组就换了，原主组里的旧 IP 规则不能变成没人管的常开口子。
+    // 只删 gd-job:<label> 且源 IP 已过期的规则，不在这些组里加任何东西。
+    for (const securityGroupId of otherSecurityGroupIds(machine)) {
+      try {
+        const cleaned = await deps.cleanupRules({ credential, machine: { ...machine, securityGroupId }, logger, shouldDelete });
+        summary.deleted += cleaned.deletedCount;
+        if (cleaned.deletedCount > 0) {
+          logger.info(`[gd-job] ${name}: cleaned ${cleaned.deletedCount} stale rule(s) in secondary security group ${securityGroupId}`);
+        }
+      } catch (err) {
+        logger.error(`[gd-job] ${name}: cleanup in secondary security group ${securityGroupId} failed: ${err.message || err}`);
+        summary.failures += 1;
+      }
     }
   }
 

@@ -151,8 +151,8 @@ docker logs -f gd-job
 | `MACHINE_DENY` | 空 | 不操作这些机器；与 `MACHINE_ALLOW` 都为空时处理所有机器 |
 | `SYNC_INTERVAL` | `5m` | 同步间隔，接受 `5m` / `30s` / 纯秒数 |
 | `REGIONS` | 十个常用地域 | 扫描地域，逗号分隔。每个地域每轮 2 次 API 调用，建议只填有机器的地域 |
-| `RULE_LABEL` | `default` | 写进规则备注。多站点部署时必须各不相同，否则两边会互删对方的规则 |
-| `IP_ENDPOINT` | `https://get-ip.rockdai.com` | 公网 IP 获取地址 |
+| `RULE_LABEL` | `default` | 写进规则备注。多站点部署时必须各不相同，否则两边会互删对方的规则。不含 `:` / `@`，≤32 字符 |
+| `IP_ENDPOINT` | `https://get-ip.rockdai.com` | 公网 IP 获取地址（10 秒超时；返回私网/回环等非公网地址会被拒绝，本轮跳过） |
 | `TZ` | 容器默认 UTC | 建议设为 `Asia/Shanghai`，否则规则备注时间差 8 小时 |
 
 名单里写的机器如果不存在（已释放、不在配置的地域、名字写错），跳过并记一行日志，不影响其他机器。
