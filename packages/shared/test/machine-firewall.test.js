@@ -3,7 +3,7 @@
 const assert = require('assert');
 const { PORT_RANGE } = require('../src/firewall-rule');
 
-function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListError = null, swasListError = null } = {}) {
+function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListError = null, swasListError = null, swasCreateErrors = {} } = {}) {
   const modulePath = require.resolve('../src/machine-firewall');
   const ecsSdkPath = require.resolve('@alicloud/ecs20140526');
   const swasSdkPath = require.resolve('@alicloud/swas-open20200601');
@@ -47,7 +47,12 @@ function loadMachineFirewallWithMocks({ ecsRules = [], swasRules = [], ecsListEr
       this.deleteCalls = [];
       swasClients.push(this);
     }
-    async createFirewallRules(req) { this.createCalls.push(req); return { body: {} }; }
+    async createFirewallRules(req) {
+      this.createCalls.push(req);
+      const proto = req.firewallRules[0].ruleProtocol;
+      if (swasCreateErrors[proto]) throw swasCreateErrors[proto];
+      return { body: {} };
+    }
     async deleteFirewallRules(req) { this.deleteCalls.push(req); return { body: {} }; }
   }
 
@@ -152,6 +157,35 @@ describe('machine-firewall addIpRules', () => {
       assert.deepStrictEqual(result.protocols, { TCP: 'added', UDP: 'added' });
       assert.strictEqual(swasClients[0].createCalls.length, 2);
       assert.strictEqual(swasClients[0].createCalls[0].firewallRules[0].remark, 'gd-job:home@2026-08-18 09:00:00');
+    } finally { restore(); }
+  });
+
+  it('treats FirewallRuleAlreadyExist from the API as already exists', async () => {
+    const { machineFirewall, restore } = loadMachineFirewallWithMocks({
+      swasRules: [], swasCreateErrors: { TCP: new Error('FirewallRuleAlreadyExist: dup') },
+    });
+    try {
+      const result = await machineFirewall.addIpRules({
+        credential: CREDENTIAL, machine: SWAS_MACHINE,
+        sourceCidrIp: '1.2.3.4/32', remark: 'gd-job:home@2026-08-18 09:00:00',
+      });
+      assert.strictEqual(result.status, 'success');
+      assert.deepStrictEqual(result.protocols, { TCP: 'exists', UDP: 'added' });
+    } finally { restore(); }
+  });
+
+  it('reports partial when one protocol create fails', async () => {
+    const { machineFirewall, restore } = loadMachineFirewallWithMocks({
+      swasRules: [], swasCreateErrors: { UDP: new Error('boom') },
+    });
+    try {
+      const result = await machineFirewall.addIpRules({
+        credential: CREDENTIAL, machine: SWAS_MACHINE,
+        sourceCidrIp: '1.2.3.4/32', remark: 'gd-job:home@2026-08-18 09:00:00',
+      });
+      assert.strictEqual(result.status, 'partial');
+      assert.strictEqual(result.message, 'TCP: added, UDP: failed (boom)');
+      assert.deepStrictEqual(result.protocols, { TCP: 'added', UDP: 'failed' });
     } finally { restore(); }
   });
 
