@@ -32,7 +32,7 @@
 | `@gd/web` | `gd-web` | `gd-web@2026-08-18 09:00:00` |
 | `@gd/scheduler` | `gd-ddns` | `gd-ddns:<域名>@2026-08-18 09:00:00` |
 | `@gd/cli` | `gd-cli` | `gd-cli:<remark>@2026-08-18 09:00:00` |
-| **`@gd/job`（新增）** | **`gd-job`** | **`gd-job:<label>@2026-08-18 09:00:00`** |
+| **`@gd/job`（新增）** | **`gd-job`** | **`gd-job:<label>@2026-08-18 09:00:00`**（精确形态：最后一个 `@` 之前恰为 `gd-job:<label>`，之后为合法时间戳；`gd-job:home@note@<ts>` 不算） |
 
 采用 `gd-cli` 那种 `前缀:标识@时间戳` 的三段形态，而不是 `gd-web` 的两段形态，是为了支持多站点部署（见 §7）。
 
@@ -109,8 +109,8 @@ packages/job/
 ```
 1. ip ← getPublicIp(endpoint)
       失败 → 记 warn，跳过本轮
-2. machines ← listMachines(regions)
-      Promise.allSettled：单个地域失败只记 warn，其余地域继续
+2. machines, failures ← listMachines(regions)
+      逐地域逐产品列举、翻页取全；单个失败只记 warn、其余继续，失败数计入本轮
 3. targets ← applyAllowDeny(machines)
 4. 对每台 target（串行）：
       rules ← 列出该机器现有规则     ← 一次调用，供 a 和 b 共用
@@ -220,7 +220,7 @@ ECS 挂载多个安全组时，只操作 `[...securityGroupIds].sort()[0]`，与
 | 失败点 | 处理 |
 |--------|------|
 | 获取公网 IP 失败 | warn，跳过本轮 |
-| 某地域列举机器失败 | warn，该地域机器视为不存在，其余地域继续（`Promise.allSettled`，与 web 一致） |
+| 某地域/产品列举机器失败 | warn（带产品与地域），该部分机器视为不存在、其余继续；同时计入本轮失败数——权限被收回或地域故障时不能打出「0 台机器、0 失败」的假绿 |
 | 某机器列举规则失败 | error，该机器既不加也不删（fail-closed，与 web 一致），计入本轮失败数 |
 | 某机器新增规则失败 | error，继续处理下一台，计入本轮失败数 |
 | 某机器只放通了部分协议 | warn，跳过该机器本轮的清理（旧规则先留着），计入本轮失败数，下一轮补齐后再清 |
@@ -232,7 +232,7 @@ ECS 挂载多个安全组时，只操作 `[...securityGroupIds].sort()[0]`，与
 
 ## 11. Docker 交付
 
-`Dockerfile` 基于 `node:20-alpine`，在仓库根执行 `npm ci --omit=dev`，入口 `node packages/job/bin/gd-job.js`。workspace symlink 在同一镜像层内可正常解析，不存在 FC 部署时那种打包丢失问题，因此不需要 `scripts/materialize-workspace-deps.sh`。
+`Dockerfile` 基于 `node:24-alpine`（Node 20 已于 2026-04 停止维护，长驻且持有 AK/SK 的容器不该跑在无安全更新的运行时上；已在 Docker 主机上验证 Node 24 无弃用警告），在仓库根执行 `npm ci --omit=dev`，入口 `node packages/job/bin/gd-job.js`。workspace symlink 在同一镜像层内可正常解析，不存在 FC 部署时那种打包丢失问题，因此不需要 `scripts/materialize-workspace-deps.sh`。
 
 两条经实测（npm 10.9.4）得出的硬约束：`npm ci` 之前必须把五个 workspace 的 `package.json` 全部拷入构建上下文，且不能加 `--workspace` 过滤。缺任一 workspace 清单或使用过滤安装，npm 装出的依赖树都是残缺的——`@alicloud/credentials` 依赖链上的 `debug` 会丢失，`require('@alicloud/ecs20140526')` 直接失败。全量 `--omit=dev` 相比过滤安装只多出 egg 相关约 3.6MB（`node_modules` 共约 74MB，大头是 `@alicloud/*` 生成的客户端），不值得为省这点体积承担风险。
 
