@@ -1588,13 +1588,14 @@ git commit -m "feat(job): add machine allow/deny selection and deterministic sec
 - Create: `packages/job/test/sync.test.js`
 
 **Interfaces:**
-- Consumes: Task 1 的 `buildManagedJobRemark` / `isManagedJobRemark`；Task 3 的 `listMachines` / `listMachineRules` / `addIpRules` / `cleanupRules`；Task 6 的 `selectMachines` / `findMissingEntries` / `withSecurityGroup`
+- Consumes: Task 1 的 `buildManagedJobRemark` / `isManagedJobRemark`；Task 3 的 `listMachines` / `listMachineRules` / `addIpRules`（含 `protocols` 返回）/ `cleanupRules`；Task 6 的 `selectMachines` / `findMissingEntries` / `withSecurityGroup`
 - Produces:
   - `buildStaleRulePredicate({ label, sourceCidrIp, product }) => (rule) => boolean`
-  - `ownsCurrentIpRule({ rules, protocol, sourceCidrIp, label, product }) => boolean`
-  - `runOnce({ config, state, deps, logger }) => Promise<{ skipped: boolean, ip: string|null, ok: boolean, converged: boolean, added: number, deleted: number, failures: number, pending: number }>`
-  - `state` 形状：`{ lastIp: string|null }`。`runOnce` 只在 `converged`（无失败、且每台机器每个协议上覆盖当前 IP 的都是自己的规则）时写入 `state.lastIp`
+  - `runOnce({ config, deps, logger }) => Promise<{ ip: string|null, ok: boolean, targets: number, added: number, deleted: number, failures: number }>`
+    - `added` / `deleted` 是**规则**条数（不是机器数），用于判断本轮有没有真的写过东西
+    - `ok` = 无失败
   - `deps` 用于注入，缺省取真实实现：`{ getPublicIp, listMachines, listMachineRules, addIpRules, cleanupRules }`
+  - 无状态：`runOnce` 不接收也不返回任何跨轮状态，每轮都是一次完整对账（spec §5.0 / §9）
 
 - [ ] **Step 1: 写失败的测试**
 
@@ -1604,7 +1605,7 @@ git commit -m "feat(job): add machine allow/deny selection and deterministic sec
 'use strict';
 
 const assert = require('assert');
-const { runOnce, buildStaleRulePredicate, ownsCurrentIpRule } = require('../src/sync');
+const { runOnce, buildStaleRulePredicate } = require('../src/sync');
 const { PORT_RANGE } = require('@gd/shared/src/firewall-rule');
 
 const SILENT = { info() {}, warn() {}, error() {} };
@@ -1619,18 +1620,9 @@ const CONFIG = {
 
 const SWAS = { product: 'swas-open', instanceId: 'swas-1', instanceName: 'blog', regionId: 'cn-hangzhou' };
 
-function makeDeps(overrides = {}) {
-  return {
-    async getPublicIp() { return '1.2.3.4'; },
-    async listMachines() { return [ SWAS ]; },
-    async listMachineRules() { return []; },
-    async addIpRules() { return { status: 'success', message: 'TCP: added, UDP: added', protocols: { TCP: 'added', UDP: 'added' } }; },
-    async cleanupRules() { return { deletedCount: 0 }; },
-    ...overrides,
-  };
-}
-
+const ADDED_BOTH = { status: 'success', message: 'TCP: added, UDP: added', protocols: { TCP: 'added', UDP: 'added' } };
 const EXISTS_BOTH = { status: 'success', message: 'TCP: already exists, UDP: already exists', protocols: { TCP: 'exists', UDP: 'exists' } };
+
 const OWN_RULES = [
   { ruleProtocol: 'TCP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: 'gd-job:home@2026-08-18 08:00:00', ruleId: 'own-tcp' },
   { ruleProtocol: 'UDP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: 'gd-job:home@2026-08-18 08:00:00', ruleId: 'own-udp' },
@@ -1639,6 +1631,29 @@ const FOREIGN_RULES = [
   { ruleProtocol: 'TCP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: 'gd-web@2026-08-18 08:00:00', ruleId: 'web-tcp' },
   { ruleProtocol: 'UDP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: 'gd-web@2026-08-18 08:00:00', ruleId: 'web-udp' },
 ];
+
+function makeDeps(overrides = {}) {
+  return {
+    async getPublicIp() { return '1.2.3.4'; },
+    async listMachines() { return [ SWAS ]; },
+    async listMachineRules() { return []; },
+    async addIpRules() { return ADDED_BOTH; },
+    async cleanupRules() { return { deletedCount: 0 }; },
+    ...overrides,
+  };
+}
+
+function captureLogger() {
+  const lines = { info: [], warn: [], error: [] };
+  return {
+    lines,
+    logger: {
+      info: (...a) => lines.info.push(a.join(' ')),
+      warn: (...a) => lines.warn.push(a.join(' ')),
+      error: (...a) => lines.error.push(a.join(' ')),
+    },
+  };
+}
 
 describe('job sync buildStaleRulePredicate', () => {
   it('selects own-label rules whose source IP differs from the current one', () => {
@@ -1673,89 +1688,20 @@ describe('job sync buildStaleRulePredicate', () => {
 });
 
 describe('job sync runOnce', () => {
-  it('skips the whole round when the IP has not changed', async () => {
-    let listed = 0;
-    const state = { lastIp: '1.2.3.4' };
-    const result = await runOnce({
-      config: CONFIG, state, logger: SILENT,
-      deps: makeDeps({ async listMachines() { listed += 1; return [ SWAS ]; } }),
-    });
-    assert.strictEqual(result.skipped, true);
-    assert.strictEqual(listed, 0);
-  });
-
-  it('recognises whether the rule covering the current IP is our own', () => {
-    const base = { protocol: 'TCP', sourceCidrIp: '1.2.3.4/32', label: 'home', product: 'swas-open' };
-    assert.strictEqual(ownsCurrentIpRule({ ...base, rules: OWN_RULES }), true);
-    assert.strictEqual(ownsCurrentIpRule({ ...base, rules: FOREIGN_RULES }), false);
-    // 别的 label 不算自己的
-    assert.strictEqual(ownsCurrentIpRule({ ...base, label: 'office', rules: OWN_RULES }), false);
-    // 同 label 但 IP 不同不算
-    assert.strictEqual(ownsCurrentIpRule({ ...base, sourceCidrIp: '9.9.9.9/32', rules: OWN_RULES }), false);
-    // ECS 字段名
-    assert.strictEqual(ownsCurrentIpRule({
-      ...base, product: 'ecs',
-      rules: [ { ipProtocol: 'TCP', portRange: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', description: 'gd-job:home@2026-08-18 08:00:00' } ],
-    }), true);
-  });
-
-  it('records lastIp when the existing rules are our own', async () => {
-    const state = { lastIp: null };
-    const result = await runOnce({
-      config: CONFIG, state, logger: SILENT,
-      deps: makeDeps({
-        async listMachineRules() { return OWN_RULES; },
-        async addIpRules() { return EXISTS_BOTH; },
-      }),
-    });
-    assert.strictEqual(result.converged, true);
-    assert.strictEqual(result.pending, 0);
-    assert.strictEqual(state.lastIp, '1.2.3.4');
-  });
-
-  it('does not record lastIp when the current IP is only covered by someone else\'s rule', async () => {
-    // 场景：用户此前在家用 Web 加过白名单，gd-web 规则覆盖了家里 IP。
-    // 那条规则 24h 后会被清掉，到时家里就没规则了——所以这台机器不算完成，下一轮要再来。
-    const infos = [];
-    const state = { lastIp: null };
-    const result = await runOnce({
-      config: CONFIG, state,
-      logger: { info: (...a) => infos.push(a.join(' ')), warn() {}, error() {} },
-      deps: makeDeps({
-        async listMachineRules() { return FOREIGN_RULES; },
-        async addIpRules() { return EXISTS_BOTH; },
-      }),
-    });
-    assert.strictEqual(result.ok, true);         // 没有报错
-    assert.strictEqual(result.converged, false); // 但没收敛
-    assert.strictEqual(result.pending, 1);
-    assert.strictEqual(state.lastIp, null);
-    assert.ok(infos.some(line => line.includes('not ours')));
-
-    // 下一轮：gd-web 规则被 web 清掉了，我们的规则建起来 → 收敛
-    const next = await runOnce({
-      config: CONFIG, state, logger: SILENT,
-      deps: makeDeps({ async listMachineRules() { return []; } }),
-    });
-    assert.strictEqual(next.converged, true);
-    assert.strictEqual(state.lastIp, '1.2.3.4');
-  });
-
-  it('adds then cleans, and records lastIp on full success', async () => {
+  it('adds then cleans', async () => {
     const order = [];
-    const state = { lastIp: null };
     const result = await runOnce({
-      config: CONFIG, state, logger: SILENT,
+      config: CONFIG, logger: SILENT,
       deps: makeDeps({
-        async addIpRules() { order.push('add'); return { status: 'success', message: 'TCP: added, UDP: added', protocols: { TCP: 'added', UDP: 'added' } }; },
+        async addIpRules() { order.push('add'); return ADDED_BOTH; },
         async cleanupRules() { order.push('cleanup'); return { deletedCount: 1 }; },
       }),
     });
     // 先加后清：先删会留出一段谁都连不上的窗口
     assert.deepStrictEqual(order, [ 'add', 'cleanup' ]);
     assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.added, 2);
     assert.strictEqual(result.deleted, 1);
-    assert.strictEqual(state.lastIp, '1.2.3.4');
   });
 
   it('passes one rule listing to both add and cleanup', async () => {
@@ -1763,10 +1709,10 @@ describe('job sync runOnce', () => {
     const seen = [];
     const rules = [ { ruleProtocol: 'TCP', port: PORT_RANGE, sourceCidrIp: '5.6.7.8/32', remark: 'gd-job:home@2026-08-17 09:00:00', ruleId: 'old' } ];
     await runOnce({
-      config: CONFIG, state: { lastIp: null }, logger: SILENT,
+      config: CONFIG, logger: SILENT,
       deps: makeDeps({
         async listMachineRules() { listCalls += 1; return rules; },
-        async addIpRules(args) { seen.push(args.rules); return { status: 'success', message: 'ok' }; },
+        async addIpRules(args) { seen.push(args.rules); return ADDED_BOTH; },
         async cleanupRules(args) { seen.push(args.rules); return { deletedCount: 1 }; },
       }),
     });
@@ -1775,87 +1721,150 @@ describe('job sync runOnce', () => {
     assert.strictEqual(seen[1], rules);
   });
 
+  it('is idempotent: a repeated round with everything in place performs no writes', async () => {
+    let created = 0;
+    let deleted = 0;
+    const result = await runOnce({
+      config: CONFIG, logger: SILENT,
+      deps: makeDeps({
+        async listMachineRules() { return OWN_RULES; },
+        async addIpRules() { created += 1; return EXISTS_BOTH; },
+        async cleanupRules() { deleted += 1; return { deletedCount: 0 }; },
+      }),
+    });
+    // addIpRules / cleanupRules 被调用（它们内部靠预检决定不写），但结果里没有任何写入
+    assert.strictEqual(created, 1);
+    assert.strictEqual(deleted, 1);
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.added, 0);
+    assert.strictEqual(result.deleted, 0);
+  });
+
+  it('heals on the next round once a foreign rule covering the IP disappears', async () => {
+    // 场景：用户此前在家用 Web 加过白名单，gd-web 规则覆盖了家里 IP。
+    // 本轮预检"已存在"，不写；24h 后 web 把它清掉，下一轮 gd-job 自动补上自己的规则。
+    // 不需要任何状态或特殊逻辑，每轮全量对账天然覆盖。
+    const first = await runOnce({
+      config: CONFIG, logger: SILENT,
+      deps: makeDeps({
+        async listMachineRules() { return FOREIGN_RULES; },
+        async addIpRules() { return EXISTS_BOTH; },
+      }),
+    });
+    assert.strictEqual(first.ok, true);
+    assert.strictEqual(first.added, 0);
+
+    const second = await runOnce({
+      config: CONFIG, logger: SILENT,
+      deps: makeDeps({ async listMachineRules() { return []; } }),
+    });
+    assert.strictEqual(second.added, 2);
+  });
+
   it('keeps stale rules when only some protocols were added', async () => {
     let cleaned = 0;
-    const state = { lastIp: null };
     const result = await runOnce({
-      config: CONFIG, state, logger: SILENT,
+      config: CONFIG, logger: SILENT,
       deps: makeDeps({
-        async addIpRules() { return { status: 'partial', message: 'TCP: added, UDP: failed (boom)' }; },
+        async addIpRules() { return { status: 'partial', message: 'TCP: added, UDP: failed (boom)', protocols: { TCP: 'added', UDP: 'failed' } }; },
         async cleanupRules() { cleaned += 1; return { deletedCount: 1 }; },
       }),
     });
-    // 新访问没完全到位前不撤旧访问；不记 lastIp，下一轮补齐后再清
+    // 新访问没完全到位前不撤旧访问；下一轮补齐 UDP 后再清
     assert.strictEqual(cleaned, 0);
     assert.strictEqual(result.ok, false);
-    assert.strictEqual(state.lastIp, null);
+    assert.strictEqual(result.failures, 1);
   });
 
-  it('does not record lastIp when any machine fails', async () => {
-    const state = { lastIp: null };
+  it('reports failure when any machine fails', async () => {
     const result = await runOnce({
-      config: CONFIG, state, logger: SILENT,
+      config: CONFIG, logger: SILENT,
       deps: makeDeps({ async addIpRules() { return { status: 'error', message: 'boom' }; } }),
     });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.failures, 1);
-    assert.strictEqual(state.lastIp, null);
   });
 
   it('fails closed for a machine whose rule listing throws', async () => {
     let added = 0;
     let cleaned = 0;
-    const state = { lastIp: null };
     const result = await runOnce({
-      config: CONFIG, state, logger: SILENT,
+      config: CONFIG, logger: SILENT,
       deps: makeDeps({
         async listMachineRules() { throw new Error('boom'); },
-        async addIpRules() { added += 1; return { status: 'success', message: 'ok' }; },
+        async addIpRules() { added += 1; return ADDED_BOTH; },
         async cleanupRules() { cleaned += 1; return { deletedCount: 0 }; },
       }),
     });
     assert.strictEqual(added, 0);
     assert.strictEqual(cleaned, 0);
     assert.strictEqual(result.ok, false);
-    assert.strictEqual(state.lastIp, null);
   });
 
-  it('does not record lastIp when fetching the public IP fails', async () => {
-    const state = { lastIp: null };
+  it('skips the round when fetching the public IP fails', async () => {
+    let listed = 0;
     const result = await runOnce({
-      config: CONFIG, state, logger: SILENT,
-      deps: makeDeps({ async getPublicIp() { throw new Error('offline'); } }),
+      config: CONFIG, logger: SILENT,
+      deps: makeDeps({
+        async getPublicIp() { throw new Error('offline'); },
+        async listMachines() { listed += 1; return [ SWAS ]; },
+      }),
     });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.ip, null);
-    assert.strictEqual(state.lastIp, null);
+    assert.strictEqual(listed, 0);
   });
 
   it('logs missing allow entries without failing the round', async () => {
-    const infos = [];
-    const state = { lastIp: null };
+    const { lines, logger } = captureLogger();
     const result = await runOnce({
       config: { ...CONFIG, allow: [ 'blog', 'released-box' ] },
-      state,
-      logger: { info: (...a) => infos.push(a.join(' ')), warn() {}, error() {} },
+      logger,
       deps: makeDeps(),
     });
     assert.strictEqual(result.ok, true);
-    assert.strictEqual(state.lastIp, '1.2.3.4');
-    assert.ok(infos.some(line => line.includes('released-box')));
+    assert.ok(lines.info.some(line => line.includes('released-box')));
   });
 
   it('uses the ECS security group chosen by sorting', async () => {
     const machines = [ { product: 'ecs', instanceId: 'i-1', instanceName: 'nas', regionId: 'cn-hangzhou', securityGroupIds: [ 'sg-b', 'sg-a' ] } ];
     let seenGroup;
     await runOnce({
-      config: CONFIG, state: { lastIp: null }, logger: SILENT,
+      config: CONFIG, logger: SILENT,
       deps: makeDeps({
         async listMachines() { return machines; },
-        async addIpRules(args) { seenGroup = args.machine.securityGroupId; return { status: 'success', message: 'ok' }; },
+        async addIpRules(args) { seenGroup = args.machine.securityGroupId; return ADDED_BOTH; },
       }),
     });
     assert.strictEqual(seenGroup, 'sg-a');
+  });
+
+  it('prints only the round summary when nothing was written and nothing failed', async () => {
+    const { lines, logger } = captureLogger();
+    await runOnce({
+      config: CONFIG, logger,
+      deps: makeDeps({
+        async listMachineRules() { return OWN_RULES; },
+        async addIpRules() { return EXISTS_BOTH; },
+      }),
+    });
+    // 一行摘要，不带机器级细节 —— 每 5 分钟一轮，安静的轮次不该刷屏
+    assert.strictEqual(lines.info.length, 1);
+    assert.ok(lines.info[0].includes('1.2.3.4'));
+    assert.ok(lines.info[0].includes('0 added'));
+    assert.strictEqual(lines.warn.length, 0);
+    assert.strictEqual(lines.error.length, 0);
+  });
+
+  it('prints machine detail when something was written', async () => {
+    const { lines, logger } = captureLogger();
+    await runOnce({
+      config: CONFIG, logger,
+      deps: makeDeps({ async cleanupRules() { return { deletedCount: 1 }; } }),
+    });
+    assert.ok(lines.info.some(line => line.includes('swas-open/blog') && line.includes('TCP: added')));
+    assert.ok(lines.info.some(line => line.includes('swas-open/blog') && line.includes('cleaned 1')));
+    assert.ok(lines.info.some(line => line.includes('2 added') && line.includes('1 removed')));
   });
 });
 ```
@@ -1905,7 +1914,7 @@ const DEFAULT_DEPS = {
 
 /**
  * 「过期规则」= 自己 label 名下、但源 IP 不是当前公网 IP 的规则。
- * 与时间无关：IP 没变时规则就该一直留着，按 TTL 删会把自己关在门外。
+ * 与时间无关：IP 没变时规则就该一直留着，按 TTL 删会制造无意义的抖动。
  */
 function buildStaleRulePredicate({ label, sourceCidrIp, product }) {
   const fields = RULE_FIELDS[product];
@@ -1920,41 +1929,24 @@ function buildStaleRulePredicate({ label, sourceCidrIp, product }) {
   };
 }
 
-/**
- * 覆盖当前 IP 的这条规则是不是自己（gd-job:<label>）建的。
- * 预检"已存在"不区分是谁的规则：如果是 gd-web / 手工规则在覆盖，它随时可能消失（gd-web 24h 后被清），
- * 那时家里就没规则了。所以只有自己的规则真的在，才算这台机器同步完成。
- */
-function ownsCurrentIpRule({ rules, protocol, sourceCidrIp, label, product }) {
-  const fields = RULE_FIELDS[product];
-  const currentIp = normalizeIpForCompare(sourceCidrIp);
-  return rules.some(rule => (
-    normalizeProtocol(getRuleField(rule, fields.protocol)) === protocol &&
-    getRuleField(rule, fields.port) === PORT_RANGE &&
-    normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === currentIp &&
-    isManagedJobRemark(getRuleField(rule, fields.remark) || '', label)
-  ));
+function countAdded(added) {
+  return Object.values(added.protocols || {}).filter(outcome => outcome === 'added').length;
 }
 
-async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console }) {
-  const summary = { skipped: false, ip: null, ok: false, converged: false, added: 0, deleted: 0, failures: 0, pending: 0 };
+/**
+ * 一轮完整对账。无状态：不记上一轮的任何东西，看到什么修什么（spec §5.0）。
+ */
+async function runOnce({ config, deps = DEFAULT_DEPS, logger = console }) {
+  const summary = { ip: null, ok: false, targets: 0, added: 0, deleted: 0, failures: 0 };
 
   let ip;
   try {
     ip = await deps.getPublicIp({ endpoint: config.ipEndpoint });
   } catch (err) {
-    logger.warn(`[gd-job] failed to fetch public ip: ${err.message || err}`);
+    logger.warn(`[gd-job] failed to fetch public ip, skipping this round: ${err.message || err}`);
     return summary;
   }
   summary.ip = ip;
-
-  if (ip === state.lastIp) {
-    logger.info(`[gd-job] public ip unchanged (${ip}), nothing to do`);
-    summary.skipped = true;
-    summary.ok = true;
-    summary.converged = true;
-    return summary;
-  }
 
   const sourceCidrIp = toSourceCidrIp(ip);
   const remark = buildManagedJobRemark(config.label);
@@ -1966,7 +1958,7 @@ async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console })
   }
 
   const targets = selectMachines(machines, config).map(withSecurityGroup);
-  logger.info(`[gd-job] public ip ${ip}, syncing ${targets.length} machine(s)`);
+  summary.targets = targets.length;
 
   for (const machine of targets) {
     const name = `${machine.product}/${machine.instanceName || machine.instanceId}`;
@@ -1989,25 +1981,16 @@ async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console })
       continue;
     }
     if (added.status === 'partial') {
-      // 新 IP 只有一个协议放通了，旧规则先留着：新访问没完全到位前不撤旧访问。
-      // failures > 0 会让 lastIp 不被记录，下一轮会重试缺的协议并完成清理。
+      // 新 IP 只有一个协议放通了，旧规则先留着：新访问没完全到位前不撤旧访问。下一轮补齐后再清。
       logger.warn(`[gd-job] ${name}: ${added.message}; keeping stale rules until all protocols succeed`);
       summary.failures += 1;
+      summary.added += countAdded(added);
       continue;
     }
-    logger.info(`[gd-job] ${name}: ${added.message}`);
-    summary.added += 1;
-
-    // "已存在"的如果不是自己的规则，这台机器不算完成：不记 lastIp，下一轮再来，直到自己的规则建起来
-    const outcomes = added.protocols || {};
-    const foreign = RULE_PROTOCOLS.filter(protocol => (
-      outcomes[protocol] === 'exists' &&
-      !ownsCurrentIpRule({ rules, protocol, sourceCidrIp, label: config.label, product: machine.product })
-    ));
-    if (foreign.length > 0) {
-      logger.info(`[gd-job] ${name}: ${foreign.join('/')} for ${ip} already covered by a rule that is not ours; will re-check every round until our own rule is in place (remove that rule, or exclude this machine via MACHINE_DENY, to stop re-checking)`);
-      summary.pending += 1;
-    }
+    const addedCount = countAdded(added);
+    summary.added += addedCount;
+    // 安静的轮次不刷屏：只有真的写了才打机器级细节
+    if (addedCount > 0) logger.info(`[gd-job] ${name}: ${added.message}`);
 
     try {
       const cleaned = await deps.cleanupRules({
@@ -2025,14 +2008,11 @@ async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console })
   }
 
   summary.ok = summary.failures === 0;
-  summary.converged = summary.ok && summary.pending === 0;
-  // 只有整轮无失败、且每台机器上覆盖当前 IP 的都是自己的规则，才记住这个 IP。
-  // 否则一次瞬时故障、或一条随时会消失的别人的规则，都会让程序永远不再重试。
-  if (summary.converged) state.lastIp = ip;
+  logger.info(`[gd-job] ${ip} → ${summary.targets} machine(s): ${summary.added} added, ${summary.deleted} removed, ${summary.failures} failed`);
   return summary;
 }
 
-module.exports = { runOnce, buildStaleRulePredicate, ownsCurrentIpRule, DEFAULT_DEPS };
+module.exports = { runOnce, buildStaleRulePredicate, DEFAULT_DEPS };
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -2055,7 +2035,7 @@ npm test
 
 ```bash
 git add packages/job/src/sync.js packages/job/test/sync.test.js
-git commit -m "feat(job): add single-round sync with add-then-clean and IP-based staleness"
+git commit -m "feat(job): add stateless single-round sync with add-then-clean and IP-based staleness"
 ```
 
 ---
@@ -2097,8 +2077,7 @@ async function main() {
 
   // 容器里 Node 是 PID 1，内核不给 PID 1 施加默认信号处置——不注册 handler 的话
   // `docker stop` 发的 SIGTERM 会被无视，10 秒后被 SIGKILL。
-  // 直接退出是安全的：每次 API 调用都是原子的，lastIp 只在内存里、本来就应随重启丢失，
-  // 中途打断的一轮下次启动会完整重做。
+  // 直接退出是安全的：每次 API 调用都是原子的，程序无状态，中途打断的一轮下次启动会完整重做。
   for (const signal of [ 'SIGINT', 'SIGTERM' ]) {
     process.on(signal, () => {
       console.log(`[gd-job] received ${signal}, exiting`);
@@ -2106,12 +2085,10 @@ async function main() {
     });
   }
 
-  const state = { lastIp: null };
-
   // 启动即同步一次，不等第一个间隔：NAS 重启后要尽快恢复访问
   for (;;) {
     try {
-      await runOnce({ config, state, logger: console });
+      await runOnce({ config, logger: console });
     } catch (err) {
       // 兜底：任何未预期的异常都不该让容器退出，下一轮继续重试
       console.error('[gd-job] unexpected error in sync round:', err);
@@ -2233,6 +2210,12 @@ services:
     image: gd-job
     container_name: gd-job
     restart: unless-stopped
+    # 每轮打一行摘要（默认 5 分钟一轮），做个轮转免得日志无限长
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       # 必填：建议用最小权限的 RAM 子账号
       ACCESS_KEY_ID: "your-access-key-id"
@@ -2403,9 +2386,9 @@ docker run -d --name gd-job --restart unless-stopped \
 
 名单里写的机器如果不存在（已释放、不在配置的地域、名字写错），跳过并记一行日志，不影响其他机器。
 
-公网 IP 与上一轮相同时整轮跳过，不重复调用阿里云接口。因此以下变化不会被自动感知，需要 `docker restart gd-job` 触发一次全量同步：新建的机器、在控制台手动删掉的 gd-job 规则、修改过的 `MACHINE_ALLOW` / `MACHINE_DENY`。
+每轮都会完整检查一遍：规则已经存在就不重复创建（不产生写操作），缺了就补，旧 IP 的规则就清。所以新建的机器、在控制台手动删掉的规则、被其他模块的规则临时覆盖的 IP，都会在下一轮（默认 5 分钟内）自动修好，不需要重启容器。
 
-如果日志里每轮都出现 `already covered by a rule that is not ours`，说明家里 IP 被一条不是 gd-job 建的规则（比如之前用 Web 加的 `gd-web`、或手工规则）覆盖着。gd-job 不会建重复规则，也不会碰别人的规则，但会每轮重检直到自己的规则建起来——`gd-web` 规则 24 小时后会被 Web 自动清理，之后 gd-job 会自动接管；手工规则则需要你删掉它，或者用 `MACHINE_DENY` 排除这台机器。
+日志：每轮一行摘要（`1.2.3.4 → 3 machine(s): 0 added, 0 removed, 0 failed`），只有真的写了规则或出错时才打印机器级细节。compose 示例里已配置日志轮转。
 ````
 
 - [ ] **Step 4: 更新项目结构**
@@ -2496,11 +2479,12 @@ gd-job 按**源 IP 不等于当前公网 IP** 判定，与时间无关。照搬 
 「IP 未变则不重复操作」直接冲突——IP 一天没变就会把当前生效的规则删掉且不重建。
 清理的机制（只认自己前缀、fail-closed、批量删）仍与 web 一致。
 
-## `lastIp` 的收敛条件
+## 每轮全量对账，不做「IP 没变就跳过」
 
-「IP 没变就跳过」只在一轮**收敛**后生效：无失败，且每台机器上覆盖当前 IP 的都是
-gd-job 自己的规则。若覆盖当前 IP 的是 `gd-web` / 手工规则，不记 `lastIp`、每轮重检——
-否则 `gd-web` 24h 后被清掉时家里会锁死到 IP 变化为止。详见 spec §9。
+原需求里的「IP 未变则不重复添加」由预检幂等天然满足（规则已存在就不调创建接口，零写操作）。
+不再额外记住上一轮 IP：那只省几十次免费只读调用，却让程序在 IP 不变期间对新机器、
+手删规则、外来规则消失等一切变化失明。与 `@gd/scheduler` 每 5 分钟无条件全量执行是同一模式。
+详见 spec §5.0。
 
 ## 重构范围
 
