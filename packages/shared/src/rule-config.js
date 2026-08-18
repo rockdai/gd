@@ -15,14 +15,6 @@ exports.RuleConfig = [{
   ],
 }, {
   product: 'swas-open',
-  instanceId: '1b78d63a2d844ac1b108630558af0aa0',
-  regionId: 'ap-northeast-1',
-  ruleList: [
-    { name: DOMAIN.XFYJ, id: 'cc75fecab9b74db0be1548f0f2207b99' },
-    { name: DOMAIN.XFYJ_BK, id: 'c6023c53805b4a4d9feab50aa497dac5' },
-  ],
-}, {
-  product: 'swas-open',
   instanceId: '9389372a50d043f4b05048967e0a4f40',
   regionId: 'us-west-1',
   ruleList: [
@@ -54,15 +46,6 @@ exports.RuleConfig = [{
   regionId: 'cn-hongkong',
   ruleList: [
     { name: DOMAIN.XFYJ, id: '351ba5164d41414e9dcc8ca00840f8b6' },
-    { name: DOMAIN.XFYJ_BK },
-  ],
-}, {
-  // b.keydiary.dev
-  product: 'swas-open',
-  instanceId: '316697f46fad405193bdd6e134e5b64e',
-  regionId: 'cn-hongkong',
-  ruleList: [
-    { name: DOMAIN.XFYJ, id: '64415df03cd94c0f9385f4106960b584' },
     { name: DOMAIN.XFYJ_BK },
   ],
 }];
