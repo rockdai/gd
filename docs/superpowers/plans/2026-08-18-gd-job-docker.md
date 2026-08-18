@@ -399,7 +399,7 @@ git commit -m "feat(shared): share region list and allow IP_ENDPOINT override"
 - Produces:
   - `listMachines({ credential, regions, logger? }) => Promise<Machine[]>`
   - `listMachineRules({ credential, machine }) => Promise<object[]>`
-  - `addIpRules({ credential, machine, sourceCidrIp, remark, rules?, logger? }) => Promise<{ status: 'success'|'partial'|'error', message: string }>`
+  - `addIpRules({ credential, machine, sourceCidrIp, remark, rules?, logger? }) => Promise<{ status: 'success'|'partial'|'error', message: string, protocols?: { TCP?: 'added'|'exists'|'failed', UDP?: 'added'|'exists'|'failed' } }>`（预检失败 / 不支持的 product 时无 `protocols`）
   - `cleanupRules({ credential, machine, shouldDelete, rules?, logger? }) => Promise<{ deletedCount: number }>`
   - `Machine` 形状：`{ product: 'ecs'|'swas-open', instanceId, instanceName, regionId, publicIpAddress: string[], status, securityGroupIds?: string[], securityGroupId?: string, tags: {key,value}[] }`
 
@@ -527,6 +527,7 @@ describe('machine-firewall addIpRules', () => {
       });
       assert.strictEqual(result.status, 'success');
       assert.strictEqual(result.message, 'TCP: already exists, UDP: already exists');
+      assert.deepStrictEqual(result.protocols, { TCP: 'exists', UDP: 'exists' });
       assert.strictEqual(ecsClients[0].authorizeCalls.length, 0);
     } finally { restore(); }
   });
@@ -558,6 +559,7 @@ describe('machine-firewall addIpRules', () => {
       });
       assert.strictEqual(result.status, 'success');
       assert.strictEqual(result.message, 'TCP: added, UDP: added');
+      assert.deepStrictEqual(result.protocols, { TCP: 'added', UDP: 'added' });
       assert.strictEqual(swasClients[0].createCalls.length, 2);
       assert.strictEqual(swasClients[0].createCalls[0].firewallRules[0].remark, 'gd-job:home@2026-08-18 09:00:00');
     } finally { restore(); }
@@ -880,6 +882,8 @@ async function addIpRules({ credential, machine, sourceCidrIp, remark, rules = n
 
   const fields = FIELDS[product];
   const protocolResults = [];
+  // 按协议记录结果：'added' | 'exists' | 'failed'。job 用它区分"已存在的是不是自己的规则"
+  const protocols = {};
   let hasSuccess = false;
   let hasFailure = false;
 
@@ -894,6 +898,7 @@ async function addIpRules({ credential, machine, sourceCidrIp, remark, rules = n
 
     if (existing) {
       protocolResults.push(`${protocol}: already exists`);
+      protocols[protocol] = 'exists';
       hasSuccess = true;
       continue;
     }
@@ -912,6 +917,7 @@ async function addIpRules({ credential, machine, sourceCidrIp, remark, rules = n
         }));
       }
       protocolResults.push(`${protocol}: added`);
+      protocols[protocol] = 'added';
       hasSuccess = true;
     } catch (err) {
       const message = err.message || '';
@@ -919,15 +925,17 @@ async function addIpRules({ credential, machine, sourceCidrIp, remark, rules = n
           message.includes('RuleDuplicate') ||
           message.includes('FirewallRuleAlreadyExist')) {
         protocolResults.push(`${protocol}: already exists`);
+        protocols[protocol] = 'exists';
         hasSuccess = true;
         continue;
       }
       protocolResults.push(`${protocol}: failed (${message})`);
+      protocols[protocol] = 'failed';
       hasFailure = true;
     }
   }
 
-  return buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure });
+  return { ...buildProtocolOperationResult(protocolResults, { hasSuccess, hasFailure }), protocols };
 }
 
 async function cleanupRules({ credential, machine, shouldDelete, rules = null, logger = NOOP_LOGGER }) {
@@ -1583,8 +1591,9 @@ git commit -m "feat(job): add machine allow/deny selection and deterministic sec
 - Consumes: Task 1 的 `buildManagedJobRemark` / `isManagedJobRemark`；Task 3 的 `listMachines` / `listMachineRules` / `addIpRules` / `cleanupRules`；Task 6 的 `selectMachines` / `findMissingEntries` / `withSecurityGroup`
 - Produces:
   - `buildStaleRulePredicate({ label, sourceCidrIp, product }) => (rule) => boolean`
-  - `runOnce({ config, state, deps, logger }) => Promise<{ skipped: boolean, ip: string|null, ok: boolean, added: number, deleted: number, failures: number }>`
-  - `state` 形状：`{ lastIp: string|null }`，`runOnce` 在整轮成功时就地写入 `state.lastIp`
+  - `ownsCurrentIpRule({ rules, protocol, sourceCidrIp, label, product }) => boolean`
+  - `runOnce({ config, state, deps, logger }) => Promise<{ skipped: boolean, ip: string|null, ok: boolean, converged: boolean, added: number, deleted: number, failures: number, pending: number }>`
+  - `state` 形状：`{ lastIp: string|null }`。`runOnce` 只在 `converged`（无失败、且每台机器每个协议上覆盖当前 IP 的都是自己的规则）时写入 `state.lastIp`
   - `deps` 用于注入，缺省取真实实现：`{ getPublicIp, listMachines, listMachineRules, addIpRules, cleanupRules }`
 
 - [ ] **Step 1: 写失败的测试**
@@ -1595,7 +1604,7 @@ git commit -m "feat(job): add machine allow/deny selection and deterministic sec
 'use strict';
 
 const assert = require('assert');
-const { runOnce, buildStaleRulePredicate } = require('../src/sync');
+const { runOnce, buildStaleRulePredicate, ownsCurrentIpRule } = require('../src/sync');
 const { PORT_RANGE } = require('@gd/shared/src/firewall-rule');
 
 const SILENT = { info() {}, warn() {}, error() {} };
@@ -1615,11 +1624,21 @@ function makeDeps(overrides = {}) {
     async getPublicIp() { return '1.2.3.4'; },
     async listMachines() { return [ SWAS ]; },
     async listMachineRules() { return []; },
-    async addIpRules() { return { status: 'success', message: 'TCP: added, UDP: added' }; },
+    async addIpRules() { return { status: 'success', message: 'TCP: added, UDP: added', protocols: { TCP: 'added', UDP: 'added' } }; },
     async cleanupRules() { return { deletedCount: 0 }; },
     ...overrides,
   };
 }
+
+const EXISTS_BOTH = { status: 'success', message: 'TCP: already exists, UDP: already exists', protocols: { TCP: 'exists', UDP: 'exists' } };
+const OWN_RULES = [
+  { ruleProtocol: 'TCP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: 'gd-job:home@2026-08-18 08:00:00', ruleId: 'own-tcp' },
+  { ruleProtocol: 'UDP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: 'gd-job:home@2026-08-18 08:00:00', ruleId: 'own-udp' },
+];
+const FOREIGN_RULES = [
+  { ruleProtocol: 'TCP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: 'gd-web@2026-08-18 08:00:00', ruleId: 'web-tcp' },
+  { ruleProtocol: 'UDP', port: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', remark: 'gd-web@2026-08-18 08:00:00', ruleId: 'web-udp' },
+];
 
 describe('job sync buildStaleRulePredicate', () => {
   it('selects own-label rules whose source IP differs from the current one', () => {
@@ -1665,13 +1684,70 @@ describe('job sync runOnce', () => {
     assert.strictEqual(listed, 0);
   });
 
+  it('recognises whether the rule covering the current IP is our own', () => {
+    const base = { protocol: 'TCP', sourceCidrIp: '1.2.3.4/32', label: 'home', product: 'swas-open' };
+    assert.strictEqual(ownsCurrentIpRule({ ...base, rules: OWN_RULES }), true);
+    assert.strictEqual(ownsCurrentIpRule({ ...base, rules: FOREIGN_RULES }), false);
+    // 别的 label 不算自己的
+    assert.strictEqual(ownsCurrentIpRule({ ...base, label: 'office', rules: OWN_RULES }), false);
+    // 同 label 但 IP 不同不算
+    assert.strictEqual(ownsCurrentIpRule({ ...base, sourceCidrIp: '9.9.9.9/32', rules: OWN_RULES }), false);
+    // ECS 字段名
+    assert.strictEqual(ownsCurrentIpRule({
+      ...base, product: 'ecs',
+      rules: [ { ipProtocol: 'TCP', portRange: PORT_RANGE, sourceCidrIp: '1.2.3.4/32', description: 'gd-job:home@2026-08-18 08:00:00' } ],
+    }), true);
+  });
+
+  it('records lastIp when the existing rules are our own', async () => {
+    const state = { lastIp: null };
+    const result = await runOnce({
+      config: CONFIG, state, logger: SILENT,
+      deps: makeDeps({
+        async listMachineRules() { return OWN_RULES; },
+        async addIpRules() { return EXISTS_BOTH; },
+      }),
+    });
+    assert.strictEqual(result.converged, true);
+    assert.strictEqual(result.pending, 0);
+    assert.strictEqual(state.lastIp, '1.2.3.4');
+  });
+
+  it('does not record lastIp when the current IP is only covered by someone else\'s rule', async () => {
+    // 场景：用户此前在家用 Web 加过白名单，gd-web 规则覆盖了家里 IP。
+    // 那条规则 24h 后会被清掉，到时家里就没规则了——所以这台机器不算完成，下一轮要再来。
+    const infos = [];
+    const state = { lastIp: null };
+    const result = await runOnce({
+      config: CONFIG, state,
+      logger: { info: (...a) => infos.push(a.join(' ')), warn() {}, error() {} },
+      deps: makeDeps({
+        async listMachineRules() { return FOREIGN_RULES; },
+        async addIpRules() { return EXISTS_BOTH; },
+      }),
+    });
+    assert.strictEqual(result.ok, true);         // 没有报错
+    assert.strictEqual(result.converged, false); // 但没收敛
+    assert.strictEqual(result.pending, 1);
+    assert.strictEqual(state.lastIp, null);
+    assert.ok(infos.some(line => line.includes('not ours')));
+
+    // 下一轮：gd-web 规则被 web 清掉了，我们的规则建起来 → 收敛
+    const next = await runOnce({
+      config: CONFIG, state, logger: SILENT,
+      deps: makeDeps({ async listMachineRules() { return []; } }),
+    });
+    assert.strictEqual(next.converged, true);
+    assert.strictEqual(state.lastIp, '1.2.3.4');
+  });
+
   it('adds then cleans, and records lastIp on full success', async () => {
     const order = [];
     const state = { lastIp: null };
     const result = await runOnce({
       config: CONFIG, state, logger: SILENT,
       deps: makeDeps({
-        async addIpRules() { order.push('add'); return { status: 'success', message: 'TCP: added, UDP: added' }; },
+        async addIpRules() { order.push('add'); return { status: 'success', message: 'TCP: added, UDP: added', protocols: { TCP: 'added', UDP: 'added' } }; },
         async cleanupRules() { order.push('cleanup'); return { deletedCount: 1 }; },
       }),
     });
@@ -1844,8 +1920,24 @@ function buildStaleRulePredicate({ label, sourceCidrIp, product }) {
   };
 }
 
+/**
+ * 覆盖当前 IP 的这条规则是不是自己（gd-job:<label>）建的。
+ * 预检"已存在"不区分是谁的规则：如果是 gd-web / 手工规则在覆盖，它随时可能消失（gd-web 24h 后被清），
+ * 那时家里就没规则了。所以只有自己的规则真的在，才算这台机器同步完成。
+ */
+function ownsCurrentIpRule({ rules, protocol, sourceCidrIp, label, product }) {
+  const fields = RULE_FIELDS[product];
+  const currentIp = normalizeIpForCompare(sourceCidrIp);
+  return rules.some(rule => (
+    normalizeProtocol(getRuleField(rule, fields.protocol)) === protocol &&
+    getRuleField(rule, fields.port) === PORT_RANGE &&
+    normalizeIpForCompare(getRuleField(rule, 'sourceCidrIp')) === currentIp &&
+    isManagedJobRemark(getRuleField(rule, fields.remark) || '', label)
+  ));
+}
+
 async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console }) {
-  const summary = { skipped: false, ip: null, ok: false, added: 0, deleted: 0, failures: 0 };
+  const summary = { skipped: false, ip: null, ok: false, converged: false, added: 0, deleted: 0, failures: 0, pending: 0 };
 
   let ip;
   try {
@@ -1860,6 +1952,7 @@ async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console })
     logger.info(`[gd-job] public ip unchanged (${ip}), nothing to do`);
     summary.skipped = true;
     summary.ok = true;
+    summary.converged = true;
     return summary;
   }
 
@@ -1905,6 +1998,17 @@ async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console })
     logger.info(`[gd-job] ${name}: ${added.message}`);
     summary.added += 1;
 
+    // "已存在"的如果不是自己的规则，这台机器不算完成：不记 lastIp，下一轮再来，直到自己的规则建起来
+    const outcomes = added.protocols || {};
+    const foreign = RULE_PROTOCOLS.filter(protocol => (
+      outcomes[protocol] === 'exists' &&
+      !ownsCurrentIpRule({ rules, protocol, sourceCidrIp, label: config.label, product: machine.product })
+    ));
+    if (foreign.length > 0) {
+      logger.info(`[gd-job] ${name}: ${foreign.join('/')} for ${ip} already covered by a rule that is not ours; will re-check every round until our own rule is in place (remove that rule, or exclude this machine via MACHINE_DENY, to stop re-checking)`);
+      summary.pending += 1;
+    }
+
     try {
       const cleaned = await deps.cleanupRules({
         credential, machine, rules, logger,
@@ -1921,12 +2025,14 @@ async function runOnce({ config, state, deps = DEFAULT_DEPS, logger = console })
   }
 
   summary.ok = summary.failures === 0;
-  // 只有整轮无失败才记住这个 IP，否则一次瞬时故障会让程序永远不再重试
-  if (summary.ok) state.lastIp = ip;
+  summary.converged = summary.ok && summary.pending === 0;
+  // 只有整轮无失败、且每台机器上覆盖当前 IP 的都是自己的规则，才记住这个 IP。
+  // 否则一次瞬时故障、或一条随时会消失的别人的规则，都会让程序永远不再重试。
+  if (summary.converged) state.lastIp = ip;
   return summary;
 }
 
-module.exports = { runOnce, buildStaleRulePredicate, DEFAULT_DEPS };
+module.exports = { runOnce, buildStaleRulePredicate, ownsCurrentIpRule, DEFAULT_DEPS };
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -2297,7 +2403,9 @@ docker run -d --name gd-job --restart unless-stopped \
 
 名单里写的机器如果不存在（已释放、不在配置的地域、名字写错），跳过并记一行日志，不影响其他机器。
 
-公网 IP 与上一轮相同时整轮跳过，不重复调用阿里云接口。
+公网 IP 与上一轮相同时整轮跳过，不重复调用阿里云接口。因此以下变化不会被自动感知，需要 `docker restart gd-job` 触发一次全量同步：新建的机器、在控制台手动删掉的 gd-job 规则、修改过的 `MACHINE_ALLOW` / `MACHINE_DENY`。
+
+如果日志里每轮都出现 `already covered by a rule that is not ours`，说明家里 IP 被一条不是 gd-job 建的规则（比如之前用 Web 加的 `gd-web`、或手工规则）覆盖着。gd-job 不会建重复规则，也不会碰别人的规则，但会每轮重检直到自己的规则建起来——`gd-web` 规则 24 小时后会被 Web 自动清理，之后 gd-job 会自动接管；手工规则则需要你删掉它，或者用 `MACHINE_DENY` 排除这台机器。
 ````
 
 - [ ] **Step 4: 更新项目结构**
@@ -2388,6 +2496,12 @@ gd-job 按**源 IP 不等于当前公网 IP** 判定，与时间无关。照搬 
 「IP 未变则不重复操作」直接冲突——IP 一天没变就会把当前生效的规则删掉且不重建。
 清理的机制（只认自己前缀、fail-closed、批量删）仍与 web 一致。
 
+## `lastIp` 的收敛条件
+
+「IP 没变就跳过」只在一轮**收敛**后生效：无失败，且每台机器上覆盖当前 IP 的都是
+gd-job 自己的规则。若覆盖当前 IP 的是 `gd-web` / 手工规则，不记 `lastIp`、每轮重检——
+否则 `gd-web` 24h 后被清掉时家里会锁死到 IP 变化为止。详见 spec §9。
+
 ## 重构范围
 
 把 `packages/web/app/service/aliyun.js` 约 240 行阿里云操作逻辑提取到
@@ -2414,6 +2528,10 @@ gd-job 按**源 IP 不等于当前公网 IP** 判定，与时间无关。照搬 
 
 本次改动了 web 的核心服务文件。虽然对外行为不变且测试全绿，但测试覆盖不到浏览器那一层，
 **建议合并后在 https://gd.rockdai.com 手动点一次「添加白名单」确认**。
+
+## 合并前待验证
+
+- [ ] 在有 Docker 的机器上执行 `docker build -f packages/job/Dockerfile -t gd-job .` 并跑通 plan Task 9 Step 6–7（本地开发机无 Docker，只做了 npm ci 的等价模拟）
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
