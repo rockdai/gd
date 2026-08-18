@@ -22,7 +22,19 @@
 
 `ecs-dsec-handler`：获取当前设备公网 IP，为每台实例创建/维护防火墙规则。
 
-定时任务只会修改/清理 `gd-ddns:` 开头的规则，Web 只会清理 `gd-web` 开头的过期规则，CLI 只会修改 `gd-cli:` 开头的规则；三者不会互相认领或删除规则。
+每个模块只认自己前缀的规则，互不认领、互不删除，也不会碰用户手工维护的规则：
+
+| 模块 | 前缀 | 清理范围 |
+|------|------|----------|
+| 定时任务 | `gd-ddns:` | 同名规则中的重复项 |
+| Web | `gd-web` | 超过 24 小时的过期规则 |
+| CLI | `gd-cli:` | 只修改，不清理 |
+| Docker 同步 | `gd-job:<label>` | 自己 label 名下、源 IP 已不是当前公网 IP 的规则 |
+
+### 4) Docker 定时同步（NAS / Homelab）
+
+`@gd/job`：部署在自己的 NAS / Homelab 上常驻运行，定时获取当前家庭网络的公网 IP，
+自动同步到阿里云 ECS / 轻量应用服务器白名单，并清理自己留下的旧 IP 规则。
 
 ## 快速开始
 
@@ -106,6 +118,46 @@ s deploy --type code
 
 环境变量需在 FC 控制台配置 `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET`。
 
+## Docker 部署（NAS / Homelab）
+
+```bash
+cp packages/job/docker-compose.example.yml docker-compose.yml
+# 编辑 docker-compose.yml 填入 AK/SK 和地域
+docker compose up -d
+docker compose logs -f gd-job
+```
+
+或直接用 docker：
+
+```bash
+docker build -f packages/job/Dockerfile -t gd-job .
+docker run -d --name gd-job --restart unless-stopped \
+  -e ACCESS_KEY_ID=xxx -e ACCESS_KEY_SECRET=yyy \
+  -e TZ=Asia/Shanghai -e REGIONS=cn-hangzhou,cn-hongkong \
+  -e RULE_LABEL=home \
+  gd-job
+```
+
+### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `ACCESS_KEY_ID` | — | 必填，阿里云 AK |
+| `ACCESS_KEY_SECRET` | — | 必填，阿里云 SK |
+| `MACHINE_ALLOW` | 空 | 只操作这些机器，逗号分隔，填实例 ID 或实例名皆可 |
+| `MACHINE_DENY` | 空 | 不操作这些机器；与 `MACHINE_ALLOW` 都为空时处理所有机器 |
+| `SYNC_INTERVAL` | `5m` | 同步间隔，接受 `5m` / `30s` / 纯秒数 |
+| `REGIONS` | 十个常用地域 | 扫描地域，逗号分隔。每个地域每轮 2 次 API 调用，建议只填有机器的地域 |
+| `RULE_LABEL` | `default` | 写进规则备注。多站点部署时必须各不相同，否则两边会互删对方的规则 |
+| `IP_ENDPOINT` | `https://get-ip.rockdai.com` | 公网 IP 获取地址 |
+| `TZ` | 容器默认 UTC | 建议设为 `Asia/Shanghai`，否则规则备注时间差 8 小时 |
+
+名单里写的机器如果不存在（已释放、不在配置的地域、名字写错），跳过并记一行日志，不影响其他机器。
+
+每轮都会完整检查一遍：规则已经存在就不重复创建（不产生写操作），缺了就补，旧 IP 的规则就清。所以新建的机器、在控制台手动删掉的规则、被其他模块的规则临时覆盖的 IP，都会在下一轮（默认 5 分钟内）自动修好，不需要重启容器。
+
+日志：每轮一行摘要（`1.2.3.4 → 3 machine(s): 0 added, 0 removed, 0 failed`），只有真的写了规则或出错时才打印机器级细节。compose 示例里已配置日志轮转。
+
 ## 认证方式
 
 Web 端默认使用密码登录：
@@ -187,6 +239,11 @@ PASSKEY_CREDENTIALS_JSON='[]'
 │   ├── scheduler/          # @gd/scheduler —— FC 定时任务
 │   │   ├── index.js
 │   │   └── test/index.test.js
+│   ├── job/                # @gd/job —— Docker 定时同步（NAS / Homelab）
+│   │   ├── src/{config,machines,sync}.js
+│   │   ├── bin/gd-job.js
+│   │   ├── Dockerfile
+│   │   └── docker-compose.example.yml
 │   └── cli/                # @gd/cli —— ecs-dsec-handler 命令行
 │       └── bin/ecs-dsec-handler.js
 └── docs/                   # 设计文档（含 spec / plan）
