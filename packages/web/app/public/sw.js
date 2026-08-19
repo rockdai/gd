@@ -38,8 +38,12 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(request)
         .then(resp => {
-          const copy = resp.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+          // Only cache good responses: a transient 4xx/5xx must not overwrite
+          // the last working offline shell.
+          if (resp.ok) {
+            const copy = resp.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
+          }
           return resp;
         })
         .catch(() => caches.match(request))
