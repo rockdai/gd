@@ -158,7 +158,7 @@ docker build -f packages/job/Dockerfile -t gd-job .
 
 每轮都会完整检查一遍：规则已经存在就不重复创建（不产生写操作），缺了就补，旧 IP 的规则就清。所以新建的机器、在控制台手动删掉的规则、被其他模块的规则临时覆盖的 IP，都会在下一轮（默认 5 分钟内）自动修好，不需要重启容器。
 
-日志：每轮一行摘要（`1.2.3.4 → 3 machine(s): 0 rule(s) added, 0 rule(s) removed, 0 failure(s)`；规则按条数计，每台机器 TCP + UDP 两条），只有真的写了规则或出错时才打印机器级细节。启动后的第一轮例外：每台机器的状态都会打印一行（含 `already exists`——比如这个 IP 已被 Web 或 DDNS 定时任务的规则放行），方便刚部署时看清全貌。compose 示例里已配置日志轮转。
+日志：每轮一行摘要（`1.2.3.4 → 3 machine(s): 0 rule(s) added, 0 rule(s) removed, 0 failure(s)`；规则按条数计，每台机器 TCP + UDP 两条），只有真的写了规则或出错时才打印机器级细节。启动后第一轮真正对账到机器时例外（启动时取 IP 失败的轮次不算）：每台机器的状态都会打印一行（含 `already exists`——比如这个 IP 已被 Web 或 DDNS 定时任务的规则放行），方便刚部署时看清全貌。compose 示例里已配置日志轮转。
 
 ## 认证方式
 

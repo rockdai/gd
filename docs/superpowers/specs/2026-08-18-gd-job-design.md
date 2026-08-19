@@ -121,7 +121,7 @@ packages/job/
       b. 清：rules 中 协议∈{TCP,UDP} 且 端口=1/65535 且 isManagedJobRemark(remark, label)
            且 源IP ≠ 当前IP 的，批量删除
 5. 打一行本轮摘要：ip、机器数、新增规则条数、删除规则条数、失败数（单位写在日志里）
-   启动后的第一轮为 verbose：每台机器的新增结果都打印（含 already exists），之后只在写入/出错时打
+   启动后第一轮真正对账到机器（targets > 0）的轮次为 verbose：每台机器的新增结果都打印（含 already exists），之后只在写入/出错时打；启动时取 IP 失败/列举抛错的轮次不消耗 verbose
 ```
 
 ### 5.0 为什么不做「IP 没变就跳过」
