@@ -45,8 +45,10 @@ function countAdded(added) {
 
 /**
  * 一轮完整对账。无状态：不记上一轮的任何东西，看到什么修什么（spec §5.0）。
+ * verbose：打印每台机器的新增结果（含 already exists）。入口在启动后的第一轮传 true，
+ * 让刚部署的人一眼看清全貌；之后的轮次只在真的写了或出错时才打机器级细节。
  */
-async function runOnce({ config, deps = DEFAULT_DEPS, logger = console }) {
+async function runOnce({ config, deps = DEFAULT_DEPS, logger = console, verbose = false }) {
   const summary = { ip: null, ok: false, targets: 0, added: 0, deleted: 0, failures: 0 };
 
   let ip;
@@ -103,7 +105,8 @@ async function runOnce({ config, deps = DEFAULT_DEPS, logger = console }) {
     const addedCount = countAdded(added);
     summary.added += addedCount;
     // 安静的轮次不刷屏：只有真的写了才打机器级细节
-    if (addedCount > 0) logger.info(`[gd-job] ${name}: ${added.message}`);
+    // 安静的轮次不刷屏：只有真的写了才打机器级细节；第一轮（verbose）例外，全部打印
+    if (verbose || addedCount > 0) logger.info(`[gd-job] ${name}: ${added.message}`);
 
     const shouldDelete = buildStaleRulePredicate({ label: config.label, sourceCidrIp, product: machine.product });
     try {
@@ -135,7 +138,8 @@ async function runOnce({ config, deps = DEFAULT_DEPS, logger = console }) {
   }
 
   summary.ok = summary.failures === 0;
-  logger.info(`[gd-job] ${ip} → ${summary.targets} machine(s): ${summary.added} added, ${summary.deleted} removed, ${summary.failures} failed`);
+  // added / deleted 是规则条数（每台机器 TCP+UDP 两条），failures 是失败的机器/列举数——单位写明白，别让人拿 8 added 去对 6 台机器
+  logger.info(`[gd-job] ${ip} → ${summary.targets} machine(s): ${summary.added} rule(s) added, ${summary.deleted} rule(s) removed, ${summary.failures} failure(s)`);
   return summary;
 }
 

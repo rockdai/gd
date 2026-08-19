@@ -188,7 +188,7 @@ describe('job sync runOnce', () => {
     assert.strictEqual(result.targets, 0);
     assert.strictEqual(result.failures, 2);
     assert.strictEqual(result.ok, false);
-    assert.ok(lines.info.some(line => line.includes('0 machine(s)') && line.includes('2 failed')));
+    assert.ok(lines.info.some(line => line.includes('0 machine(s)') && line.includes('2 failure(s)')));
   });
 
   it('reports failure when any machine fails', async () => {
@@ -314,9 +314,22 @@ describe('job sync runOnce', () => {
     // 一行摘要，不带机器级细节 —— 每 5 分钟一轮，安静的轮次不该刷屏
     assert.strictEqual(lines.info.length, 1);
     assert.ok(lines.info[0].includes('1.2.3.4'));
-    assert.ok(lines.info[0].includes('0 added'));
+    assert.ok(lines.info[0].includes('0 rule(s) added'));
     assert.strictEqual(lines.warn.length, 0);
     assert.strictEqual(lines.error.length, 0);
+  });
+
+  it('verbose prints every machine even when nothing was written (first round after start)', async () => {
+    const { lines, logger } = captureLogger();
+    await runOnce({
+      config: CONFIG, logger, verbose: true,
+      deps: makeDeps({
+        async listMachineRules() { return OWN_RULES; },
+        async addIpRules() { return EXISTS_BOTH; },
+      }),
+    });
+    assert.ok(lines.info.some(line => line.includes('swas-open/blog') && line.includes('TCP: already exists, UDP: already exists')));
+    assert.ok(lines.info.some(line => line.includes('0 rule(s) added')));
   });
 
   it('prints machine detail when something was written', async () => {
@@ -327,6 +340,6 @@ describe('job sync runOnce', () => {
     });
     assert.ok(lines.info.some(line => line.includes('swas-open/blog') && line.includes('TCP: added')));
     assert.ok(lines.info.some(line => line.includes('swas-open/blog') && line.includes('cleaned 1')));
-    assert.ok(lines.info.some(line => line.includes('2 added') && line.includes('1 removed')));
+    assert.ok(lines.info.some(line => line.includes('2 rule(s) added') && line.includes('1 rule(s) removed')));
   });
 });

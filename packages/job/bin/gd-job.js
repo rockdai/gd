@@ -30,10 +30,14 @@ async function main() {
     });
   }
 
-  // 启动即同步一次，不等第一个间隔：NAS 重启后要尽快恢复访问
+  // 启动即同步一次，不等第一个间隔：NAS 重启后要尽快恢复访问。
+  // 第一轮 verbose：把每台机器的状态都打出来（含 already exists），之后安静。
+  // 只有真的对账到机器的那一轮才算"打过全貌"——启动时取 IP 失败/列举抛错的轮次什么都没打，不能把 verbose 消耗掉。
+  let verbose = true;
   for (;;) {
     try {
-      await runOnce({ config, logger: console });
+      const summary = await runOnce({ config, logger: console, verbose });
+      if (summary.targets > 0) verbose = false;
     } catch (err) {
       // 兜底：任何未预期的异常都不该让容器退出，下一轮继续重试
       console.error('[gd-job] unexpected error in sync round:', err);
