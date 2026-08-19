@@ -1,0 +1,19 @@
+[
+  {
+    "product": "swas-open",
+    "instanceId": "<轻量应用服务器实例 ID>",
+    "regionId": "cn-hangzhou",
+    "ruleList": [
+      { "name": "home.example.com", "id": "<可选：已由定时任务创建的规则 ID，用于定位>" },
+      { "name": "office.example.com" }
+    ]
+  },
+  {
+    "product": "ecs",
+    "groupId": "sg-<ECS 安全组 ID>",
+    "regionId": "cn-hangzhou",
+    "ruleList": [
+      { "name": "home.example.com" }
+    ]
+  }
+]

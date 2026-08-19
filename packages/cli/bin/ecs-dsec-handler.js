@@ -49,7 +49,8 @@ function parseArgs(argv) {
     }
     console.log('[ecs-dsec-handler] credential source =', source || '(unknown)');
 
-    const { RuleConfig } = require('@gd/shared/src/rule-config');
+    const { loadRuleConfig } = require('@gd/shared/src/rule-config');
+    const RuleConfig = loadRuleConfig();
 
     // For now we only implement swas-open, since current config is swas-open.
     for (const conf of RuleConfig) {

@@ -1,51 +1,50 @@
 'use strict';
 
-const DOMAIN = exports.DOMAIN = {
-  XFYJ: 'xfyj.keydiary.dev',
-  XFYJ_BK: 'xfyj2.keydiary.dev',
-};
+const fs = require('fs');
 
-exports.RuleConfig = [{
-  product: 'swas-open',
-  instanceId: '5c7bfc974c694ee498de6bbb7c8e5bab',
-  regionId: 'cn-hangzhou',
-  ruleList: [
-    { name: DOMAIN.XFYJ, id: 'de66f0d108914ffa90cc5ee4b07ae178' },
-    { name: DOMAIN.XFYJ_BK, id: '48dc7007353e490baf79e1104e566dc0' },
-  ],
-}, {
-  product: 'swas-open',
-  instanceId: '9389372a50d043f4b05048967e0a4f40',
-  regionId: 'us-west-1',
-  ruleList: [
-    { name: DOMAIN.XFYJ, id: '7ea5c24bb3c148c0b67b9719873c6dec' },
-    { name: DOMAIN.XFYJ_BK, id: 'ec66ce20a3af441082fa4cf1323d9d40' },
-  ],
-}, {
-  // i-bp1hrakbpd2a3kmmrxb9
-  product: 'ecs',
-  groupId: 'sg-bp16x7uldelv1s1tqisl',
-  regionId: 'cn-hangzhou',
-  ruleList: [
-    { name: DOMAIN.XFYJ },
-    { name: DOMAIN.XFYJ_BK },
-  ],
-}, {
-  // i-6we5bo95gjitc6gjbvrd (z.keydiary.dev)
-  product: 'ecs',
-  groupId: 'sg-6we8w7b53xb740p9vypz',
-  regionId: 'ap-northeast-1',
-  ruleList: [
-    { name: DOMAIN.XFYJ },
-    { name: DOMAIN.XFYJ_BK },
-  ],
-}, {
-  // a.keydiary.dev
-  product: 'swas-open',
-  instanceId: '0e86734f0efc44c38d510c56358bad5e',
-  regionId: 'cn-hongkong',
-  ruleList: [
-    { name: DOMAIN.XFYJ, id: '351ba5164d41414e9dcc8ca00840f8b6' },
-    { name: DOMAIN.XFYJ_BK },
-  ],
-}];
+// DDNS 定时任务（@gd/scheduler）和 CLI 的规则配置：哪些域名要同步到哪些机器的白名单。
+// 这是每个部署者自己的基础设施拓扑，不进仓库——从环境变量读：
+//   RULE_CONFIG_JSON   内联 JSON（函数计算等托管环境用这个）
+//   RULE_CONFIG_FILE   JSON 文件路径（本地用；仓库根目录的 rule-config.json 已 gitignore）
+// 格式见仓库根目录 rule-config.example.json。
+const PRODUCTS = new Set([ 'ecs', 'swas-open' ]);
+
+function loadRuleConfig(env = process.env) {
+  let raw = env.RULE_CONFIG_JSON;
+  let source = 'RULE_CONFIG_JSON';
+  if (!raw && env.RULE_CONFIG_FILE) {
+    raw = fs.readFileSync(env.RULE_CONFIG_FILE, 'utf8');
+    source = env.RULE_CONFIG_FILE;
+  }
+  if (!raw) {
+    throw new Error('Rule config is required: set RULE_CONFIG_JSON or RULE_CONFIG_FILE (see rule-config.example.json)');
+  }
+
+  let config;
+  try {
+    config = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Rule config (${source}) is not valid JSON: ${err.message}`);
+  }
+  if (!Array.isArray(config)) throw new Error(`Rule config (${source}) must be a JSON array`);
+
+  config.forEach((conf, i) => {
+    const at = `Rule config (${source}) [${i}]`;
+    if (!PRODUCTS.has(conf?.product)) throw new Error(`${at}.product must be one of: ${[ ...PRODUCTS ].join(', ')}`);
+    if (!conf.regionId) throw new Error(`${at}.regionId is required`);
+    if (conf.product === 'ecs' && !conf.groupId) throw new Error(`${at}.groupId is required for ecs`);
+    if (conf.product === 'swas-open' && !conf.instanceId) throw new Error(`${at}.instanceId is required for swas-open`);
+    if (!Array.isArray(conf.ruleList) || conf.ruleList.length === 0) throw new Error(`${at}.ruleList must be a non-empty array`);
+    conf.ruleList.forEach((rule, j) => {
+      if (!rule?.name) throw new Error(`${at}.ruleList[${j}].name (domain) is required`);
+    });
+  });
+  return config;
+}
+
+// 需要解析的域名 = 所有 ruleList[].name 去重（保持首次出现顺序）
+function domainsOf(ruleConfig) {
+  return [ ...new Set(ruleConfig.flatMap(conf => conf.ruleList.map(rule => rule.name))) ];
+}
+
+module.exports = { loadRuleConfig, domainsOf };
