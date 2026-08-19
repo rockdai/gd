@@ -6,15 +6,26 @@ const { issueAccessToken } = require('../../lib/access-token');
 class PasskeyController extends Controller {
   async status() {
     const { ctx } = this;
+    // 这是登录页的引导端点：passkey 配置坏了（如 PASSKEY_CREDENTIALS_JSON 粘贴错）
+    // 只应表现为"passkey 不可用"，不能拖垮整个响应——否则前端拿不到 ipEndpoint，
+    // 也没法提示密码登录仍然可用
+    let passkeyStatus;
     try {
-      ctx.body = {
-        success: true,
-        ...ctx.service.passkey.getPublicStatus(),
-        ipEndpoint: this.config.ipEndpoint,
-      };
+      passkeyStatus = ctx.service.passkey.getPublicStatus();
     } catch (err) {
-      this.handleError('passkey/status', err);
+      ctx.logger.error('[passkey/status] passkey config is broken, reporting passkey as unavailable:', err);
+      passkeyStatus = {
+        passkeyConfigured: false,
+        passkeyEnrollmentEnabled: false,
+        passkeyReady: false,
+        approvedCredentialCount: 0,
+      };
     }
+    ctx.body = {
+      success: true,
+      ...passkeyStatus,
+      ipEndpoint: this.config.ipEndpoint,
+    };
   }
 
   async authOptions() {

@@ -40,14 +40,14 @@ describe('firewall-rule helpers', () => {
   });
 
   it('distinguishes managed scheduler and cli remarks from manual remarks', () => {
-    const ddnsRemark = buildManagedDdnsRemark('xfyj.keydiary.dev', '2026-04-17 12:00:00');
+    const ddnsRemark = buildManagedDdnsRemark('home.example.com', '2026-04-17 12:00:00');
     const cliRemark = buildManagedCliRemark('ecs-dsec-handler', '2026-04-17 12:00:00');
 
-    assert.strictEqual(isManagedDdnsRemark(ddnsRemark, 'xfyj.keydiary.dev'), true);
-    assert.strictEqual(isLegacyManagedDdnsRemark('xfyj.keydiary.dev@2026-04-17 12:00:00', 'xfyj.keydiary.dev'), true);
-    assert.strictEqual(isManagedDdnsRemark('xfyj.keydiary.dev@2026-04-17 12:00:00', 'xfyj.keydiary.dev'), false);
-    assert.strictEqual(isManagedDdnsRemark('gd-web@2026-04-17 12:00:00', 'xfyj.keydiary.dev'), false);
-    assert.strictEqual(isManagedDdnsRemark('云谷园区', 'xfyj.keydiary.dev'), false);
+    assert.strictEqual(isManagedDdnsRemark(ddnsRemark, 'home.example.com'), true);
+    assert.strictEqual(isLegacyManagedDdnsRemark('home.example.com@2026-04-17 12:00:00', 'home.example.com'), true);
+    assert.strictEqual(isManagedDdnsRemark('home.example.com@2026-04-17 12:00:00', 'home.example.com'), false);
+    assert.strictEqual(isManagedDdnsRemark('gd-web@2026-04-17 12:00:00', 'home.example.com'), false);
+    assert.strictEqual(isManagedDdnsRemark('云谷园区', 'home.example.com'), false);
     assert.strictEqual(isLegacyManagedCliRemark('ecs-dsec-handler@2026-04-17 12:00:00', 'ecs-dsec-handler'), true);
     assert.strictEqual(isManagedCliRemark(cliRemark, 'ecs-dsec-handler'), true);
     assert.strictEqual(isManagedCliRemark('ecs-dsec-handler@2026-04-17 12:00:00', 'ecs-dsec-handler'), true);
@@ -93,12 +93,12 @@ describe('firewall-rule helpers', () => {
 
   it('treats only timestamped gd-web/gd-ddns/gd-cli remarks as our managed rules', () => {
     assert.strictEqual(isOurManagedRemark('gd-web@2026-04-17 12:00:00'), true);
-    assert.strictEqual(isOurManagedRemark('gd-ddns:xfyj.keydiary.dev@2026-04-17 12:00:00'), true);
+    assert.strictEqual(isOurManagedRemark('gd-ddns:home.example.com@2026-04-17 12:00:00'), true);
     assert.strictEqual(isOurManagedRemark('gd-cli:ecs-dsec-handler@2026-04-17 12:00:00'), true);
 
     assert.strictEqual(isOurManagedRemark('云谷园区'), false);
     assert.strictEqual(isOurManagedRemark('云谷园区@2020-01-01 12:00:00'), false);
-    assert.strictEqual(isOurManagedRemark('xfyj.keydiary.dev@2026-04-17 12:00:00'), false);
+    assert.strictEqual(isOurManagedRemark('home.example.com@2026-04-17 12:00:00'), false);
     assert.strictEqual(isOurManagedRemark('ecs-dsec-handler@2026-04-17 12:00:00'), false);
     assert.strictEqual(isOurManagedRemark('gd-web'), false);
     assert.strictEqual(isOurManagedRemark('gd-web@invalid'), false);
@@ -142,7 +142,7 @@ describe('firewall-rule helpers', () => {
 
   it('ignores configured ids that point to non-managed rules', () => {
     const ruleConf = {
-      name: 'xfyj.keydiary.dev',
+      name: 'home.example.com',
       id: 'manual-rule-id',
     };
     const rules = [ {

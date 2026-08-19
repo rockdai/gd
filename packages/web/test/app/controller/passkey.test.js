@@ -19,4 +19,24 @@ describe('controller/passkey status', () => {
       ipEndpoint: 'https://ip.example.com',
     });
   });
+
+  it('still returns success + ipEndpoint when the passkey config is broken', async () => {
+    const errors = [];
+    const ctx = {
+      app: { config: { ipEndpoint: 'https://ip.example.com' } },
+      logger: { error: (...args) => errors.push(args) },
+      service: { passkey: { getPublicStatus: () => { throw new Error('PASSKEY_CREDENTIALS_JSON is not valid JSON'); } } },
+      body: null,
+    };
+    await new PasskeyController(ctx).status();
+    assert.deepStrictEqual(ctx.body, {
+      success: true,
+      passkeyConfigured: false,
+      passkeyEnrollmentEnabled: false,
+      passkeyReady: false,
+      approvedCredentialCount: 0,
+      ipEndpoint: 'https://ip.example.com',
+    });
+    assert.strictEqual(errors.length, 1);
+  });
 });

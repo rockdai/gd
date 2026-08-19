@@ -28,7 +28,8 @@ describe('rule-config', () => {
 
   it('rejects malformed input', () => {
     assert.throws(() => loadRuleConfig({ RULE_CONFIG_JSON: '{not json' }), /not valid JSON/);
-    assert.throws(() => loadRuleConfig({ RULE_CONFIG_JSON: '{}' }), /must be a JSON array/);
+    assert.throws(() => loadRuleConfig({ RULE_CONFIG_JSON: '{}' }), /must be a non-empty JSON array/);
+    assert.throws(() => loadRuleConfig({ RULE_CONFIG_JSON: '[]' }), /must be a non-empty JSON array/);
     assert.throws(() => loadRuleConfig({ RULE_CONFIG_JSON: JSON.stringify([{ product: 'rds', regionId: 'x', ruleList: [{ name: 'a' }] }]) }), /\[0\]\.product/);
     assert.throws(() => loadRuleConfig({ RULE_CONFIG_JSON: JSON.stringify([{ product: 'ecs', regionId: 'x', ruleList: [{ name: 'a' }] }]) }), /\[0\]\.groupId/);
     assert.throws(() => loadRuleConfig({ RULE_CONFIG_JSON: JSON.stringify([{ product: 'swas-open', regionId: 'x', ruleList: [{ name: 'a' }] }]) }), /\[0\]\.instanceId/);

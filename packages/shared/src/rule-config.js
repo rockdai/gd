@@ -26,7 +26,7 @@ function loadRuleConfig(env = process.env) {
   } catch (err) {
     throw new Error(`Rule config (${source}) is not valid JSON: ${err.message}`);
   }
-  if (!Array.isArray(config)) throw new Error(`Rule config (${source}) must be a JSON array`);
+  if (!Array.isArray(config) || config.length === 0) throw new Error(`Rule config (${source}) must be a non-empty JSON array`);
 
   config.forEach((conf, i) => {
     const at = `Rule config (${source}) [${i}]`;

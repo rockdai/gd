@@ -78,9 +78,10 @@ npm run dev
 npm i
 
 # 使用配置文件（凭证 .aliyun.conf + 规则 rule-config.json）
-RULE_CONFIG_FILE=rule-config.json node bin/ecs-dsec-handler.js
+export RULE_CONFIG_FILE=rule-config.json
+node bin/ecs-dsec-handler.js
 
-# 使用环境变量
+# 凭证也可以走环境变量
 ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node bin/ecs-dsec-handler.js
 
 # 指定 IP / dry-run
@@ -118,7 +119,14 @@ s deploy --type code
 > `s.yaml` 已包含 `actions.pre-deploy` 钩子，会在打包前自动跑 `scripts/materialize-workspace-deps.sh`——把 `node_modules/@gd/*` 的 workspace symlink 替换为实体副本，确保 FC 端 require `@gd/shared` 正常解析。
 > **本地副作用提醒**：跑过 `s deploy` 后 `node_modules/@gd/*` 会从 symlink 变成静态副本；想恢复 symlink（让本地源码修改实时可见）重新跑一次 `npm install` 即可。
 
-环境变量需在 FC 控制台配置 `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET`。
+环境变量需在 FC 控制台配置（部署工作流只更新代码，不会带任何配置）：
+
+| 函数 | 必须 | 说明 |
+|------|------|------|
+| `gd-web` | `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET` | 阿里云凭证 |
+| `gd-web` | `PASSKEY_RP_ID` / `PASSKEY_ORIGIN` | 不配则 Passkey 登录不可用（密码登录不受影响） |
+| `ecs-dsec` | `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET` | 阿里云凭证 |
+| `ecs-dsec` | `RULE_CONFIG_JSON` | DDNS 规则配置（见 `rule-config.example.json`）；**缺失时每次定时调用都会直接报错**，升级到含规则加载器的版本前先配好 |
 
 ## Docker 部署（NAS / Homelab）
 
