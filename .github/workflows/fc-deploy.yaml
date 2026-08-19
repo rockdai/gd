@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   deploy:
+    # 只在上游仓库跑：fork 里没有对应 secrets，跑了也只会失败
+    if: github.repository == 'rockdai/gd'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -18,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         run: npm install --production
