@@ -25,6 +25,8 @@ concurrency:
 
 jobs:
   publish:
+    # 只在上游仓库跑：fork 里没有对应 secrets，跑了也只会失败
+    if: github.repository == 'rockdai/gd'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

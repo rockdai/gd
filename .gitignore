@@ -139,3 +139,5 @@ docker-compose.yml
 run/
 logs/
 typings/
+# DDNS 定时任务的个人规则配置（RULE_CONFIG_FILE），见 rule-config.example.json
+rule-config.json

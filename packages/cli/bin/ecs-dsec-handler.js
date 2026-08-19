@@ -49,9 +49,13 @@ function parseArgs(argv) {
     }
     console.log('[ecs-dsec-handler] credential source =', source || '(unknown)');
 
-    const { RuleConfig } = require('@gd/shared/src/rule-config');
+    const { loadRuleConfig } = require('@gd/shared/src/rule-config');
+    const RuleConfig = loadRuleConfig();
 
-    // For now we only implement swas-open, since current config is swas-open.
+    // This CLI only implements swas-open. ECS entries are valid config (the
+    // scheduler handles them) — skip them per entry, but if NOTHING here is
+    // handleable, exit non-zero instead of pretending success.
+    let handled = 0;
     for (const conf of RuleConfig) {
       if (conf.product !== 'swas-open') {
         console.log('[ecs-dsec-handler] skip unsupported product:', conf.product);
@@ -64,6 +68,10 @@ function parseArgs(argv) {
         dryRun: args.dryRun,
         credential: { accessKeyId, accessKeySecret },
       });
+      handled += 1;
+    }
+    if (handled === 0) {
+      throw new Error('rule config contains no swas-open entries — this CLI only supports swas-open (ECS entries are handled by the scheduler)');
     }
 
     console.log('[ecs-dsec-handler] done');

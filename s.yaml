@@ -10,7 +10,7 @@ vars:
 #
 # pre-deploy 钩子把 npm workspaces symlink 实体化到 node_modules/@gd/*，
 # 避免 Serverless Devs 打包对 symlink 处理不确定。详见
-# docs/superpowers/specs/2026-05-15-monorepo-restructure-design.md §7.3
+# docs/design/2026-05-15-monorepo-restructure-design.md §7.3
 
 resources:
   # Web service (Egg.js PWA)

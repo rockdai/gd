@@ -1,17 +1,24 @@
 {
   "name": "gd",
   "version": "1.0.0",
+  "description": "Gateway Guard — 阿里云 ECS / 轻量应用服务器 (SWAS) 白名单管理：Web、DDNS 定时任务、CLI、NAS Docker 同步",
   "private": true,
-  "repository": "git@github.com:rockdai/gd.git",
-  "workspaces": ["packages/*"],
+  "license": "MIT",
+  "repository": "https://github.com/rockdai/gd.git",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "ecs-dsec-handler": "bin/ecs-dsec-handler.js"
   },
   "scripts": {
-    "dev":   "npm run dev   -w @gd/web",
+    "dev": "npm run dev -w @gd/web",
     "start": "npm run start -w @gd/web",
-    "test":  "npm test --workspaces --if-present --include-workspace-root=false",
-    "cov":   "npm run cov --workspaces --if-present --include-workspace-root=false"
+    "test": "npm test --workspaces --if-present --include-workspace-root=false",
+    "cov": "npm run cov --workspaces --if-present --include-workspace-root=false"
   },
   "devDependencies": {
     "egg-bin": "^6.13.0"

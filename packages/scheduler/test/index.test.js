@@ -157,10 +157,10 @@ describe('scheduler rule ownership', () => {
           product: 'ecs',
           regionId: 'cn-hangzhou',
           groupId: 'sg-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'manual-ecs-rule' } ],
+          ruleList: [ { name: 'home.example.com', id: 'manual-ecs-rule' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -174,7 +174,7 @@ describe('scheduler rule ownership', () => {
         loaded.ecsClients[0].authorizeCalls.map(req => req.ipProtocol),
         [ 'TCP', 'UDP' ]
       );
-      assert(loaded.ecsClients[0].authorizeCalls.every(req => req.description === 'gd-ddns:xfyj.keydiary.dev@2026-04-17 12:00:00'));
+      assert(loaded.ecsClients[0].authorizeCalls.every(req => req.description === 'gd-ddns:home.example.com@2026-04-17 12:00:00'));
     } finally {
       loaded.cleanup();
     }
@@ -197,10 +197,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'manual-swas-rule' } ],
+          ruleList: [ { name: 'home.example.com', id: 'manual-swas-rule' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -214,7 +214,7 @@ describe('scheduler rule ownership', () => {
         loaded.swasClients[0].createCalls.map(req => req.firewallRules[0].ruleProtocol),
         [ 'TCP', 'UDP' ]
       );
-      assert(loaded.swasClients[0].createCalls.every(req => req.firewallRules[0].remark === 'gd-ddns:xfyj.keydiary.dev@2026-04-17 12:00:00'));
+      assert(loaded.swasClients[0].createCalls.every(req => req.firewallRules[0].remark === 'gd-ddns:home.example.com@2026-04-17 12:00:00'));
     } finally {
       loaded.cleanup();
     }
@@ -226,7 +226,7 @@ describe('scheduler rule ownership', () => {
         ruleId: 'legacy-unprefixed-rule',
         ruleProtocol: 'TCP',
         port: PORT_RANGE,
-        remark: 'xfyj.keydiary.dev@2026-04-16 09:00:00',
+        remark: 'home.example.com@2026-04-16 09:00:00',
         sourceCidrIp: '2.2.2.2/32',
       } ],
     });
@@ -237,10 +237,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'legacy-unprefixed-rule' } ],
+          ruleList: [ { name: 'home.example.com', id: 'legacy-unprefixed-rule' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -255,7 +255,7 @@ describe('scheduler rule ownership', () => {
         loaded.swasClients[0].createCalls.map(req => req.firewallRules[0].ruleProtocol),
         [ 'TCP', 'UDP' ]
       );
-      assert(loaded.swasClients[0].createCalls.every(req => req.firewallRules[0].remark === 'gd-ddns:xfyj.keydiary.dev@2026-04-17 12:00:00'));
+      assert(loaded.swasClients[0].createCalls.every(req => req.firewallRules[0].remark === 'gd-ddns:home.example.com@2026-04-17 12:00:00'));
     } finally {
       loaded.cleanup();
     }
@@ -275,14 +275,14 @@ describe('scheduler rule ownership', () => {
           ruleId: 'managed-tcp-1',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 10:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 10:00:00',
           sourceCidrIp: '2.2.2.2/32',
         },
         {
           ruleId: 'managed-tcp-2',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 11:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 11:00:00',
           sourceCidrIp: '3.3.3.3/32',
         },
       ],
@@ -294,10 +294,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'web-tcp-rule' } ],
+          ruleList: [ { name: 'home.example.com', id: 'web-tcp-rule' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -325,21 +325,21 @@ describe('scheduler rule ownership', () => {
           ruleId: 'managed-tcp-1',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 09:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 09:00:00',
           sourceCidrIp: '2.2.2.2/32',
         },
         {
           ruleId: 'managed-tcp-2',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 10:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 10:00:00',
           sourceCidrIp: '3.3.3.3/32',
         },
         {
           ruleId: 'managed-udp-1',
           ruleProtocol: 'UDP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 11:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 11:00:00',
           sourceCidrIp: '4.4.4.4/32',
         },
       ],
@@ -351,10 +351,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'managed-tcp-1' } ],
+          ruleList: [ { name: 'home.example.com', id: 'managed-tcp-1' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -382,21 +382,21 @@ describe('scheduler rule ownership', () => {
           ruleId: 'managed-tcp-old',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 09:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 09:00:00',
           sourceCidrIp: '2.2.2.2/32',
         },
         {
           ruleId: 'managed-tcp-current',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 10:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 10:00:00',
           sourceCidrIp: '1.2.3.4/32',
         },
         {
           ruleId: 'managed-udp-1',
           ruleProtocol: 'UDP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 11:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 11:00:00',
           sourceCidrIp: '4.4.4.4/32',
         },
       ],
@@ -408,10 +408,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'managed-tcp-old' } ],
+          ruleList: [ { name: 'home.example.com', id: 'managed-tcp-old' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -438,20 +438,20 @@ describe('scheduler rule ownership', () => {
           ruleId: 'managed-tcp-1',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 09:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 09:00:00',
           sourceCidrIp: '2.2.2.2/32',
         },
         {
           ruleId: 'managed-tcp-2',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 10:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 10:00:00',
           sourceCidrIp: '3.3.3.3/32',
         },
         {
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 11:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 11:00:00',
           sourceCidrIp: '4.4.4.4/32',
         },
       ],
@@ -463,10 +463,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'managed-tcp-1' } ],
+          ruleList: [ { name: 'home.example.com', id: 'managed-tcp-1' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -488,14 +488,14 @@ describe('scheduler rule ownership', () => {
         {
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 09:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 09:00:00',
           sourceCidrIp: '1.2.3.4/32',
         },
         {
           ruleId: 'managed-tcp-old',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 10:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 10:00:00',
           sourceCidrIp: '2.2.2.2/32',
         },
       ],
@@ -507,10 +507,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'managed-tcp-old' } ],
+          ruleList: [ { name: 'home.example.com', id: 'managed-tcp-old' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -535,14 +535,14 @@ describe('scheduler rule ownership', () => {
           ruleId: 'managed-tcp-1',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 09:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 09:00:00',
           sourceCidrIp: '2.2.2.2/32',
         },
         {
           ruleId: 'managed-tcp-2',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 10:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 10:00:00',
           sourceCidrIp: '3.3.3.3/32',
         },
       ],
@@ -554,10 +554,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'managed-tcp-1' } ],
+          ruleList: [ { name: 'home.example.com', id: 'managed-tcp-1' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -593,10 +593,10 @@ describe('scheduler rule ownership', () => {
           product: 'ecs',
           regionId: 'cn-hangzhou',
           groupId: 'sg-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev' } ],
+          ruleList: [ { name: 'home.example.com' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -628,10 +628,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev' } ],
+          ruleList: [ { name: 'home.example.com' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -654,7 +654,7 @@ describe('scheduler rule ownership', () => {
           ruleId: 'managed-tcp',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 09:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 09:00:00',
           sourceCidrIp: '1.2.3.4/32',
         },
         {
@@ -673,10 +673,10 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'managed-tcp' } ],
+          ruleList: [ { name: 'home.example.com', id: 'managed-tcp' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
@@ -697,7 +697,7 @@ describe('scheduler rule ownership', () => {
           ruleId: 'managed-tcp-1',
           ruleProtocol: 'TCP',
           port: PORT_RANGE,
-          remark: 'gd-ddns:xfyj.keydiary.dev@2026-04-16 09:00:00',
+          remark: 'gd-ddns:home.example.com@2026-04-16 09:00:00',
           sourceCidrIp: '2.2.2.2/32',
         },
       ],
@@ -709,17 +709,17 @@ describe('scheduler rule ownership', () => {
           product: 'swas-open',
           regionId: 'cn-hangzhou',
           instanceId: 'i-test',
-          ruleList: [ { name: 'xfyj.keydiary.dev', id: 'managed-tcp-1' } ],
+          ruleList: [ { name: 'home.example.com', id: 'managed-tcp-1' } ],
         },
         ipMap: {
-          'xfyj.keydiary.dev': '1.2.3.4',
+          'home.example.com': '1.2.3.4',
         },
         current: '2026-04-17 12:00:00',
         credential: {},
       });
 
       assert.deepStrictEqual(errors, [
-        '[swas-open/cn-hangzhou/i-test] xfyj.keydiary.dev TCP modify failed: {"code":"UnexpectedSdkFailure"}',
+        '[swas-open/cn-hangzhou/i-test] home.example.com TCP modify failed: {"code":"UnexpectedSdkFailure"}',
       ]);
       assert.strictEqual(loaded.swasClients[0].createCalls.length, 1);
       assert.strictEqual(loaded.swasClients[0].createCalls[0].firewallRules[0].ruleProtocol, 'UDP');

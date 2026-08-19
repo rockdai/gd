@@ -12,7 +12,7 @@ const {
   DeleteFirewallRulesRequest,
 } = require('@alicloud/swas-open20200601');
 
-const { DOMAIN, RuleConfig } = require('@gd/shared/src/rule-config');
+const { loadRuleConfig, domainsOf } = require('@gd/shared/src/rule-config');
 const {
   PORT_RANGE,
   RULE_PROTOCOLS,
@@ -31,9 +31,11 @@ const { listSecurityGroupRules } = require('@gd/shared/src/ecs-firewall');
 
 exports.handler = (evt, ctx, cb) => {
   (async () => {
+    // 规则配置来自环境变量（RULE_CONFIG_JSON / RULE_CONFIG_FILE），每次调用重新读，缺失/格式错直接失败
+    const RuleConfig = loadRuleConfig();
 
     // 首先将所有域名解析出 IP 地址以备后用
-    const domainList = Object.values(DOMAIN);
+    const domainList = domainsOf(RuleConfig);
     console.log('Domain config', domainList);
 
     const ipMap = {};

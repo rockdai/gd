@@ -8,7 +8,7 @@
 
 基于 [Egg.js](https://eggjs.org/) 的 Progressive Web App，提供可视化界面：
 
-- 前端直接调用 `get-ip.rockdai.com` 获取当前设备公网 IP（客户端侧获取真实 IP）
+- 前端直接请求 `IP_ENDPOINT`（默认 `https://get-ip.rockdai.com`，作者自建的 best-effort 服务，自部署建议换成自己的）获取当前设备公网 IP（客户端侧获取真实 IP）
 - 一键将当前公网 IP 添加到用户机器白名单
 - 支持添加指定 IP 到机器白名单
 - 基于 AK/SK 自动拉取用户的阿里云 ECS 和轻量应用服务器列表
@@ -68,17 +68,20 @@ npm run dev
 > `npm run dev` / `npm run start` / `npm test` 在根目录均可直接用——根 `package.json` 把它们转发到对应 workspace。
 > 若只跑某一包的测试：`npm test -w @gd/shared`、`npm test -w @gd/web`、`npm test -w @gd/scheduler`。
 
-> 生产域名固定为 `https://gd.rockdai.com`，Passkey 默认也按这个域名配置。`http://127.0.0.1:7001` 只适合普通密码登录开发，不适合直接做 Passkey 真机联调。
+> Passkey 依赖固定的 RP ID / origin（`PASSKEY_RP_ID` / `PASSKEY_ORIGIN`），要按你实际部署的域名配置。`http://127.0.0.1:7001` 只适合普通密码登录开发，不适合直接做 Passkey 真机联调。
 
 ### 命令行工具
+
+规则配置见「配置 → 定时任务 / CLI 的规则配置」（`RULE_CONFIG_FILE=rule-config.json` 或 `RULE_CONFIG_JSON`）。
 
 ```bash
 npm i
 
-# 使用配置文件
+# 使用配置文件（凭证 .aliyun.conf + 规则 rule-config.json）
+export RULE_CONFIG_FILE=rule-config.json
 node bin/ecs-dsec-handler.js
 
-# 使用环境变量
+# 凭证也可以走环境变量
 ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node bin/ecs-dsec-handler.js
 
 # 指定 IP / dry-run
@@ -89,7 +92,7 @@ node bin/ecs-dsec-handler.js --dry-run
 ### 本地调试（定时任务 handler）
 
 ```bash
-ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy node -e "require('./index').handler({}, {}, console.log)"
+ACCESS_KEY_ID=xxx ACCESS_KEY_SECRET=yyy RULE_CONFIG_FILE=rule-config.json node -e "require('./index').handler({}, {}, console.log)"
 ```
 
 ## 部署到函数计算 FC
@@ -116,7 +119,14 @@ s deploy --type code
 > `s.yaml` 已包含 `actions.pre-deploy` 钩子，会在打包前自动跑 `scripts/materialize-workspace-deps.sh`——把 `node_modules/@gd/*` 的 workspace symlink 替换为实体副本，确保 FC 端 require `@gd/shared` 正常解析。
 > **本地副作用提醒**：跑过 `s deploy` 后 `node_modules/@gd/*` 会从 symlink 变成静态副本；想恢复 symlink（让本地源码修改实时可见）重新跑一次 `npm install` 即可。
 
-环境变量需在 FC 控制台配置 `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET`。
+环境变量需在 FC 控制台配置（部署工作流只更新代码，不会带任何配置）：
+
+| 函数 | 必须 | 说明 |
+|------|------|------|
+| `gd-web` | `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET` | 阿里云凭证 |
+| `gd-web` | `PASSKEY_RP_ID` / `PASSKEY_ORIGIN` | 不配则 Passkey 登录不可用（密码登录不受影响） |
+| `ecs-dsec` | `ACCESS_KEY_ID` / `ACCESS_KEY_SECRET` | 阿里云凭证 |
+| `ecs-dsec` | `RULE_CONFIG_JSON` | DDNS 规则配置（见 `rule-config.example.json`）；**缺失时每次定时调用都会直接报错**，升级到含规则加载器的版本前先配好 |
 
 ## Docker 部署（NAS / Homelab）
 
@@ -174,7 +184,7 @@ Web 端默认使用密码登录：
 `/openapi/*` 路由用 `Authorization: Bearer <PASSWORD>` 直接鉴权，不走 JWT。同 IP 1 分钟内 5 次错误密码会被限流到 429。示例：
 
 ```bash
-curl -X POST https://gd.rockdai.com/openapi/whitelist \
+curl -X POST https://gd.example.com/openapi/whitelist \
   -H "Authorization: Bearer $PASSWORD" \
   -d ip=1.2.3.4 -d product=swas-open -d instanceId=i-xxx -d regionId=cn-hangzhou
 ```
@@ -192,8 +202,8 @@ Passkey 采用**单用户 allowlist** 模型：
 
 - `PASSKEY_ENABLED`：是否启用 passkey 能力，默认 `true`
 - `PASSKEY_RP_NAME`：显示给系统弹窗的站点名称，默认 `GD`
-- `PASSKEY_RP_ID`：WebAuthn RP ID，默认 `gd.rockdai.com`
-- `PASSKEY_ORIGIN`：完整来源，默认 `https://gd.rockdai.com`
+- `PASSKEY_RP_ID`：WebAuthn RP ID（如 `gd.example.com`），**必填**，不配则 Passkey 不可用（密码登录不受影响）
+- `PASSKEY_ORIGIN`：完整来源（如 `https://gd.example.com`），**必填**，同上
 - `PASSKEY_USER_NAME`：单用户逻辑用户名，默认 `admin`
 - `PASSKEY_USER_DISPLAY_NAME`：单用户显示名，默认 `GD Admin`
 - `PASSKEY_USER_ID`：单用户稳定 ID，默认 `gd-admin`
@@ -208,8 +218,8 @@ Passkey 采用**单用户 allowlist** 模型：
 ```bash
 PASSWORD='your-password'
 JWT_SECRET='replace-me'
-PASSKEY_RP_ID='gd.rockdai.com'
-PASSKEY_ORIGIN='https://gd.rockdai.com'
+PASSKEY_RP_ID='gd.example.com'
+PASSKEY_ORIGIN='https://gd.example.com'
 PASSKEY_CREDENTIALS_JSON='[]'
 ```
 
@@ -219,7 +229,7 @@ PASSKEY_CREDENTIALS_JSON='[]'
 ├── package.json            # npm workspaces 入口；scripts 转发到子 package
 ├── bootstrap.js            # 根 shim → packages/web/bootstrap（FC web handler）
 ├── index.js                # 根 shim → packages/scheduler（FC ecs-dsec handler）
-├── config.js               # 根 shim → @gd/shared/src/rule-config（兜底外部 require）
+├── rule-config.example.json # DDNS 定时任务规则配置示例（真实配置放 rule-config.json，已 gitignore）
 ├── bin/ecs-dsec-handler.js # 根 shim → packages/cli/bin/...
 ├── s.yaml                  # Serverless Devs 部署配置；含 pre-deploy 钩子
 ├── scripts/
@@ -230,7 +240,7 @@ PASSKEY_CREDENTIALS_JSON='[]'
 │   │   │   ├── firewall-rule.js, swas-firewall.js, ecs-firewall.js
 │   │   │   ├── ip.js, aliyun-conf.js, public-ip.js
 │   │   │   ├── handler-swas-open.js
-│   │   │   └── rule-config.js          # 原根 config.js（DOMAIN + RuleConfig）
+│   │   │   └── rule-config.js          # 规则配置加载器（RULE_CONFIG_JSON / RULE_CONFIG_FILE）
 │   │   └── test/
 │   ├── web/                # @gd/web —— Egg.js PWA + OpenAPI
 │   │   ├── app/{controller,middleware,service,public}/, router.js
@@ -248,7 +258,7 @@ PASSKEY_CREDENTIALS_JSON='[]'
 │   │   └── docker-compose.example.yml
 │   └── cli/                # @gd/cli —— ecs-dsec-handler 命令行
 │       └── bin/ecs-dsec-handler.js
-└── docs/                   # 设计文档（含 spec / plan）
+└── docs/design/            # 设计文档（spec）
 ```
 
 ## API
@@ -295,17 +305,27 @@ PASSKEY_CREDENTIALS_JSON='[]'
 
 - `aliyun.accessKeyId` / `aliyun.accessKeySecret`：阿里云凭证（默认读取环境变量）
 - `aliyun.regions`：扫描机器列表时覆盖的地域
+- `ipEndpoint`（env `IP_ENDPOINT`）：浏览器端查询公网 IP 的地址，纯文本返回 IPv4；通过 `/api/auth/status` 下发给前端。默认 `https://get-ip.rockdai.com`（作者自建，best-effort，会看到你的出口 IP），自部署建议换成自己的
 
-### 定时任务配置（`config.js`）
+### 定时任务 / CLI 的规则配置（`RULE_CONFIG_JSON` / `RULE_CONFIG_FILE`）
 
-- `DOMAIN`：需要解析的 DDNS 域名列表
-- `RuleConfig`：需要更新的规则列表
-- `RuleConfig[].ruleList[].id` / `ids`：仅用于定位已由定时任务创建、且 remark 以 `gd-ddns:` 开头的规则；`gd-web`、`gd-cli` 或手工维护规则即使 ID 填在这里也不会被定时任务认领
+哪些 DDNS 域名要同步到哪些机器，是每个部署者自己的拓扑，不进仓库。两种给法（前者优先）：
+
+- `RULE_CONFIG_JSON`：内联 JSON（函数计算等托管环境在控制台环境变量里填）
+- `RULE_CONFIG_FILE`：JSON 文件路径（本地：`cp rule-config.example.json rule-config.json` 后编辑，`rule-config.json` 已 gitignore）
+
+格式见 `rule-config.example.json`，一个数组，每项：
+
+- `product`：`ecs` 或 `swas-open`；`regionId`
+- `groupId`（ecs 安全组）/ `instanceId`（swas-open 实例）
+- `ruleList[].name`：DDNS 域名（会解析成 IP 写入规则）；所有 `name` 去重后就是要解析的域名列表
+- `ruleList[].id`（可选）：仅用于定位已由定时任务创建、且 remark 以 `gd-ddns:` 开头的规则；`gd-web`、`gd-cli` 或手工维护的规则即使 ID 填在这里也不会被定时任务认领
+
+缺失或格式错误会在启动/调用时直接报错，不会静默跳过。
 
 ## 开发/协作约定
 
-- **对该 GitHub 仓库的任何改动都请走 PR**：新建分支 → push 分支 → 提 PR → 评审合并
-- 不要直接 push 到 `main`
+见 [CONTRIBUTING.md](CONTRIBUTING.md)；安全问题请看 [SECURITY.md](SECURITY.md)。
 
 ## License
 
