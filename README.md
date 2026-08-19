@@ -1,4 +1,4 @@
-# GD (Gateway Guard)
+# GD (GuarD)
 
 [![CI](https://github.com/rockdai/gd/actions/workflows/ci.yaml/badge.svg)](https://github.com/rockdai/gd/actions/workflows/ci.yaml)
 [![Docker](https://img.shields.io/docker/v/rockdai/gd/latest?label=docker&logo=docker)](https://hub.docker.com/r/rockdai/gd)
@@ -6,7 +6,7 @@
 
 阿里云 **ECS 安全组 / 轻量应用服务器（SWAS）防火墙** 白名单管理。四种形态覆盖「把动态 IP 放行到自己机器」的常见场景：手机网页一键放行、DDNS 域名跟踪、命令行、NAS 常驻同步。
 
-> GD (Gateway Guard) manages firewall whitelists for Alibaba Cloud ECS security groups and Simple Application Server (SWAS). It ships four tools around one job — keeping your ever-changing client IP allowed on your own machines: a PWA for one-tap allow, a DDNS-tracking scheduled function, a CLI, and a Docker daemon for NAS / homelab. Docs are Chinese-first.
+> GD (GuarD) manages firewall whitelists for Alibaba Cloud ECS security groups and Simple Application Server (SWAS). It ships four tools around one job — keeping your ever-changing client IP allowed on your own machines: a PWA for one-tap allow, a DDNS-tracking scheduled function, a CLI, and a Docker daemon for NAS / homelab. Docs are Chinese-first.
 
 | 组件 | 适用场景 | 部署形态 |
 |------|----------|----------|
