@@ -2231,7 +2231,7 @@ services:
       RULE_LABEL: "home"
 
       # 可选：只操作这些机器（填实例 ID 或实例名皆可）
-      # MACHINE_ALLOW: "nas-hk,i-bp1hrakbpd2a3kmmrxb9"
+      # MACHINE_ALLOW: "nas-hk,i-bp1xxxxxxxxxxxxxxxx"
 
       # 可选：不操作这些机器
       # MACHINE_DENY: "prod-db"
