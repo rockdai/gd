@@ -2,6 +2,7 @@
   "name": "@gd/job",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "bin": {
     "gd-job": "bin/gd-job.js"
   },

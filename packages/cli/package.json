@@ -2,6 +2,7 @@
   "name": "@gd/cli",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "bin": {
     "ecs-dsec-handler": "bin/ecs-dsec-handler.js"
   },
