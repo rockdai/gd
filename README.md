@@ -32,7 +32,7 @@
 
 ## 快速开始
 
-先准备一个**最小权限** RAM 子账号的 AK/SK（所需权限见 [SECURITY.md](SECURITY.md)）。
+先准备一个**最小权限** RAM 子账号的 AK/SK（所需权限见 [SECURITY.md](SECURITY.md)）。Docker 方式不需要 clone 仓库；Web / CLI / 定时任务需要 clone 后先 `npm i`（Node >= 20，npm workspaces 一次装齐所有包）。
 
 ### Docker 同步（最容易上手）
 
@@ -83,6 +83,7 @@ npm run dev    # http://127.0.0.1:7001
 ### CLI
 
 ```bash
+npm i
 cp .aliyun.conf.example .aliyun.conf            # 凭证（或走环境变量）
 cp rule-config.example.json rule-config.json    # 规则配置（哪些域名放行到哪些机器）
 export RULE_CONFIG_FILE=rule-config.json
@@ -156,7 +157,7 @@ Face ID / Passkey 采用**单用户 allowlist** 模型：公开页面只允许�
 | `PASSKEY_USER_NAME` / `PASSKEY_USER_DISPLAY_NAME` / `PASSKEY_USER_ID` | `admin` / `GD Admin` / `gd-admin` | 单用户身份信息 |
 | `PASSKEY_CHALLENGE_TTL_SEC` | `300` | challenge 有效期（秒） |
 | `PASSKEY_FLOW_TOKEN_SECRET` | 由 `JWT_SECRET` 派生 | challenge token 签名密钥 |
-| `PASSKEY_COUNTERS_FILE` | `packages/web/run/passkey-counters.json` | passkey counter 持久化路径 |
+| `PASSKEY_COUNTERS_FILE` | `packages/web/run/passkey-counters.json` | passkey counter 持久化路径。从 monorepo 化之前的版本升级的部署注意：旧默认是 `run/passkey-counters.json`，需要把旧文件 mv 过来或显式配置本变量，否则丢失 counter 历史（用于检测认证器克隆/回滚） |
 
 > 本地 `http://127.0.0.1:7001` 只适合密码登录开发；Passkey 依赖固定的 RP ID / origin，真机联调要用实际部署域名。
 
