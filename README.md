@@ -250,7 +250,7 @@ PASSKEY_CREDENTIALS_JSON='[]'
 │   │   └── docker-compose.example.yml
 │   └── cli/                # @gd/cli —— ecs-dsec-handler 命令行
 │       └── bin/ecs-dsec-handler.js
-└── docs/                   # 设计文档（含 spec / plan）
+└── docs/design/            # 设计文档（spec）
 ```
 
 ## API

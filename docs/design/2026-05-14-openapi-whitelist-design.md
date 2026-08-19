@@ -61,7 +61,7 @@ Headers:
 
 curl 示例：
 ```bash
-curl -X POST https://gd.rockdai.com/openapi/whitelist \
+curl -X POST https://gd.example.com/openapi/whitelist \
   -H "Authorization: Bearer $PASSWORD" \
   -d ip=1.2.3.4 -d product=swas-open -d instanceId=i-xxx -d regionId=cn-hangzhou
 ```
