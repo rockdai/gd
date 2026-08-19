@@ -629,6 +629,8 @@
 
   <script>
     let currentIp = '';
+    // 公网 IP 查询地址：由后端 /api/auth/status 下发（IP_ENDPOINT），这里只是拿到之前的兜底
+    let ipEndpoint = 'https://get-ip.rockdai.com';
     let machines = [];
     let authToken = localStorage.getItem('gd_token') || '';
     let loginViewportHandler = null;
@@ -689,6 +691,7 @@
         const resp = await fetch('/api/auth/status', { cache: 'no-store' });
         const data = await resp.json();
         if (data.success) {
+          if (data.ipEndpoint) ipEndpoint = data.ipEndpoint;
           authStatus = {
             passkeyReady: !!data.passkeyReady,
             passkeyConfigured: !!data.passkeyConfigured,
@@ -1083,7 +1086,7 @@
 
       try {
         // Fetch public IP directly from the browser so we get the client's real IP
-        const resp = await fetch('https://get-ip.rockdai.com', { headers: { accept: 'text/plain' } });
+        const resp = await fetch(ipEndpoint, { headers: { accept: 'text/plain' } });
         if (!resp.ok) throw new Error('HTTP ' + resp.status);
         const text = await resp.text();
         const m = text.match(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/);

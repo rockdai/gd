@@ -10,6 +10,7 @@ class PasskeyController extends Controller {
       ctx.body = {
         success: true,
         ...ctx.service.passkey.getPublicStatus(),
+        ipEndpoint: this.config.ipEndpoint,
       };
     } catch (err) {
       this.handleError('passkey/status', err);
