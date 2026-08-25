@@ -16,7 +16,7 @@
     "@gd/shared": "*",
     "@alicloud/ecs20140526": "6.1.0",
     "@alicloud/swas-open20200601": "4.0.0",
-    "egg": "^3.34.0",
+    "egg": "^4.0.10",
     "jsonwebtoken": "^9.0.3",
     "@simplewebauthn/server": "^13.3.0"
   }
