@@ -18,6 +18,6 @@
     "@alicloud/swas-open20200601": "4.0.0",
     "egg": "^3.34.0",
     "jsonwebtoken": "^9.0.3",
-    "@simplewebauthn/server": "^13.3.0"
+    "@simplewebauthn/server": "^13.3.2"
   }
 }
