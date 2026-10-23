@@ -1,9 +1,13 @@
 // Service Worker for PWA offline support
-const CACHE_NAME = 'gd-whitelist-v2';
+const CACHE_NAME = 'gd-whitelist-v3';
 const STATIC_ASSETS = [
   '/',
   '/public/index.html',
   '/public/manifest.json',
+  '/public/icons/favicon-32.png',
+  '/public/icons/apple-touch-icon.png',
+  '/public/icons/icon-192.png',
+  '/public/icons/icon-512.png',
 ];
 
 self.addEventListener('install', event => {
