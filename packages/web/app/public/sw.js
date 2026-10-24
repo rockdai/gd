@@ -1,5 +1,5 @@
 // Service Worker for PWA offline support
-const CACHE_NAME = 'gd-whitelist-v3';
+const CACHE_NAME = 'gd-whitelist-v4';
 const STATIC_ASSETS = [
   '/',
   '/public/index.html',
@@ -12,7 +12,9 @@ const STATIC_ASSETS = [
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(
+      STATIC_ASSETS.map(path => new Request(path, { cache: 'reload' }))
+    ))
   );
   self.skipWaiting();
 });
@@ -20,43 +22,38 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k.startsWith('gd-whitelist-') && k !== CACHE_NAME).map(k => caches.delete(k)))
     )
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
   const { request } = event;
+  const url = new URL(request.url);
 
-  // For API requests, always go to network
-  if (request.url.includes('/api/')) {
-    event.respondWith(fetch(request));
-    return;
-  }
+  // Only cache the public shell and its explicit assets. Authenticated APIs,
+  // OpenAPI writes and the external public-IP endpoint always use the network.
+  if (request.method !== 'GET' || url.origin !== self.location.origin || !STATIC_ASSETS.includes(url.pathname)) return;
 
-  // HTML shell: network first, cache fallback. Cache-first here would pin the
-  // installed PWA to a stale page until the user clears site data — config like
-  // the IP endpoint is baked into the HTML response, so it must be refreshable.
-  if (request.mode === 'navigate' || new URL(request.url).pathname === '/public/index.html') {
-    event.respondWith(
-      fetch(request)
-        .then(resp => {
-          // Only cache good responses: a transient 4xx/5xx must not overwrite
-          // the last working offline shell.
-          if (resp.ok) {
-            const copy = resp.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(request, copy));
-          }
-          return resp;
-        })
-        .catch(() => caches.match(request))
-    );
-    return;
-  }
+  // Show the cached shell immediately while FC wakes up. Revalidate on every
+  // visit so a deployment is picked up on the next visit without clearing data.
+  // Configuration still comes from the uncached auth bootstrap endpoint.
+  const cachePromise = caches.open(CACHE_NAME);
+  const cached = cachePromise.then(cache => cache.match(url.pathname)).catch(() => undefined);
+  const fresh = fetch(request, { cache: 'no-store' });
+  event.waitUntil(
+    fresh.then(async response => {
+      // Never replace the working offline shell with an error or a redirect.
+      if (response.ok && !response.redirected && response.type !== 'opaque') {
+        const copy = response.clone();
+        const cache = await cachePromise;
+        await cache.put(url.pathname, copy);
+      }
+    }).catch(() => {})
+  );
 
-  // Other static assets: cache first, then network
   event.respondWith(
-    caches.match(request).then(cached => cached || fetch(request))
+    cached.then(response => response || fresh)
   );
 });

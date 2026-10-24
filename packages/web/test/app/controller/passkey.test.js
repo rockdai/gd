@@ -7,6 +7,7 @@ const PasskeyController = require('../../../app/controller/passkey');
 describe('controller/passkey status', () => {
   it('exposes the configured IP endpoint alongside the passkey status', async () => {
     const ctx = {
+      set() {},
       app: { config: { ipEndpoint: 'https://ip.example.com' } },
       service: { passkey: { getPublicStatus: () => ({ passkeyReady: false, passkeyConfigured: false }) } },
       body: null,
@@ -23,6 +24,7 @@ describe('controller/passkey status', () => {
   it('still returns success + ipEndpoint when the passkey config is broken', async () => {
     const errors = [];
     const ctx = {
+      set() {},
       app: { config: { ipEndpoint: 'https://ip.example.com' } },
       logger: { error: (...args) => errors.push(args) },
       service: { passkey: { getPublicStatus: () => { throw new Error('PASSKEY_CREDENTIALS_JSON is not valid JSON'); } } },

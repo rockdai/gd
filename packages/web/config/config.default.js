@@ -61,6 +61,7 @@ module.exports = appInfo => {
   config.jwtAuth = {
     skipPaths: [
       '/',            // HTML shell (contains login form)
+      '/sw.js',       // Root-scoped PWA service worker
       '/api/login',   // Login endpoint itself
       '/api/auth/status',
       '/api/passkey/auth/options',

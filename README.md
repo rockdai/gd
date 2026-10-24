@@ -78,6 +78,8 @@ npm run dev    # http://127.0.0.1:7001
 
 页面功能：自动列出所有 ECS + 轻量服务器 → 显示当前设备公网 IP（浏览器直连 `IP_ENDPOINT`，拿的是客户端真实 IP，不是服务端出口 IP）→ 勾选机器一键放行；也可以手填任意 IP。
 
+再次打开网页或 iOS 桌面入口时，优先显示已缓存的页面，后台更新到最新版本；登录状态通过轻量接口验证后，IP 和机器列表分别加载。首次访问或系统清除站点缓存后，仍需等待服务器返回页面。
+
 生产部署（FC 或自托管 `npm start`，监听 `PORT`，默认 9000）需要配置的环境变量见下方[Web 配置](#web-配置)。
 
 ### CLI
@@ -167,6 +169,7 @@ Face ID / Passkey 采用**单用户 allowlist** 模型：公开页面只允许�
 |------|------|------|
 | GET | `/` | PWA 首页 |
 | GET | `/api/auth/status` | 认证方式状态 + `ipEndpoint` 下发 |
+| GET | `/api/auth/session` | JWT 验证 + 认证方式/IP 配置，不调用云端机器列表 |
 | POST | `/api/login` | 密码登录，返回 JWT |
 | POST | `/api/passkey/auth/options` · `/api/passkey/auth/verify` | Passkey 登录 |
 | POST | `/api/passkey/register/options` · `/api/passkey/register/verify` | 已登录态下绑定新设备 |
