@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs/promises');
 
 let cachedHtml = null;
+let cachedServiceWorker = null;
 
 class HomeController extends Controller {
   async index() {
@@ -15,6 +16,15 @@ class HomeController extends Controller {
     }
     ctx.set('content-type', 'text/html; charset=utf-8');
     ctx.body = cachedHtml;
+  }
+
+  async serviceWorker() {
+    if (!cachedServiceWorker) {
+      cachedServiceWorker = await fs.readFile(path.join(this.app.baseDir, 'app/public/sw.js'), 'utf8');
+    }
+    this.ctx.set('content-type', 'application/javascript; charset=utf-8');
+    this.ctx.set('cache-control', 'no-cache');
+    this.ctx.body = cachedServiceWorker;
   }
 }
 

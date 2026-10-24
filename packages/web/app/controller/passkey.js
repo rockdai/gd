@@ -6,6 +6,7 @@ const { issueAccessToken } = require('../../lib/access-token');
 class PasskeyController extends Controller {
   async status() {
     const { ctx } = this;
+    ctx.set('cache-control', 'no-store');
     // 这是登录页的引导端点：passkey 配置坏了（如 PASSKEY_CREDENTIALS_JSON 粘贴错）
     // 只应表现为"passkey 不可用"，不能拖垮整个响应——否则前端拿不到 ipEndpoint，
     // 也没法提示密码登录仍然可用
