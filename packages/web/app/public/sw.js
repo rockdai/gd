@@ -40,7 +40,7 @@ self.addEventListener('fetch', event => {
   // visit so a deployment is picked up on the next visit without clearing data.
   // Configuration still comes from the uncached auth bootstrap endpoint.
   const cachePromise = caches.open(CACHE_NAME);
-  const cached = cachePromise.then(cache => cache.match(url.pathname));
+  const cached = cachePromise.then(cache => cache.match(url.pathname)).catch(() => undefined);
   const fresh = fetch(request, { cache: 'no-store' });
   event.waitUntil(
     fresh.then(async response => {

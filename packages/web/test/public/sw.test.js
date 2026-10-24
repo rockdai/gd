@@ -13,7 +13,7 @@ const deferred = () => {
   return { promise, resolve, reject };
 };
 
-function worker(fetch) {
+function worker(fetch, { cacheUnavailable = false } = {}) {
   const handlers = {}, entries = new Map(), deleted = [];
   let precached;
   const cache = {
@@ -28,7 +28,10 @@ function worker(fetch) {
     },
     fetch,
     caches: {
-      open: async () => cache,
+      open: async () => {
+        if (cacheUnavailable) throw new Error('Cache storage unavailable');
+        return cache;
+      },
       keys: async () => [ 'gd-whitelist-v3', 'gd-whitelist-v4', 'another-app' ],
       delete: async key => { deleted.push(key); },
     },
@@ -67,6 +70,13 @@ describe('PWA shell caching', () => {
     assert.strictEqual(await (await event.response).text(), 'first shell');
     await event.done();
     assert.strictEqual(await w.entries.get('/').text(), 'first shell');
+  });
+
+  it('still serves the network response when browser cache storage is unavailable', async () => {
+    const w = worker(async () => new Response('network shell'), { cacheUnavailable: true });
+    const event = w.dispatch('fetch', request());
+    assert.strictEqual(await (await event.response).text(), 'network shell');
+    await event.done();
   });
 
   for (const [ label, fetch ] of [
